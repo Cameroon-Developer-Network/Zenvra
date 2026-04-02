@@ -1,0 +1,70 @@
+name: Feature Request
+description: Propose a new feature or improvement
+title: "feat: "
+labels: ["enhancement", "needs-triage"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Great ideas make Zenvra better. Tell us what you're thinking.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which area does this relate to?
+      options:
+        - Scan engine (new vulnerability type or language)
+        - Web UI
+        - CLI
+        - VS Code extension
+        - GitHub / GitLab integration
+        - CVE explanations / AI layer
+        - Dashboard / reporting
+        - API
+        - Pricing / access control
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the pain point, not just the solution.
+      placeholder: "Right now I have to... which is frustrating because..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: solution
+    attributes:
+      label: Describe the solution you'd like
+      placeholder: "I'd like Zenvra to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Any alternatives you've considered?
+      placeholder: "I also thought about... but..."
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: How important is this to you?
+      options:
+        - Nice to have
+        - Important
+        - Blocking my use of Zenvra
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this has not been requested before
+          required: true

@@ -17,3 +17,4 @@ tracing.workspace = true
 reqwest.workspace = true
 regex = "1"
 walkdir = "2"
+async-trait = "0.1"

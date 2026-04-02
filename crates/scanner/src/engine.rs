@@ -1,66 +1,52 @@
-//! Scan engine orchestrator — runs all requested engines in parallel.
+//! Scan engine orchestrator — runs all requested engines and merges results.
 
-use crate::{Engine, finding::Finding, language::Language};
+use crate::{ScanConfig, finding::RawFinding};
+use serde::{Deserialize, Serialize};
 
-/// Run all requested scan engines concurrently and merge results.
-pub async fn run(
-    code: &str,
-    language: Language,
-    engines: &[Engine],
-) -> anyhow::Result<Vec<Finding>> {
+/// Scan engines available in Zenvra.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Engine {
+    /// Static Application Security Testing — analyses source code patterns.
+    Sast,
+    /// Software Composition Analysis — checks dependency vulnerabilities.
+    Sca,
+    /// Detects hardcoded secrets, API keys, and credentials.
+    Secrets,
+    /// Patterns specific to AI/vibe-generated code.
+    AiCode,
+}
+
+impl std::fmt::Display for Engine {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Engine::Sast => write!(f, "SAST"),
+            Engine::Sca => write!(f, "SCA"),
+            Engine::Secrets => write!(f, "Secrets"),
+            Engine::AiCode => write!(f, "AI Code"),
+        }
+    }
+}
+
+/// Run all requested scan engines and merge results.
+///
+/// Engines run sequentially for now; will be parallelised with `tokio::join!`
+/// once individual engines are mature enough.
+pub async fn run(config: &ScanConfig) -> anyhow::Result<Vec<RawFinding>> {
     let mut findings = Vec::new();
 
-    // TODO: Run engines concurrently with tokio::join! in future iterations.
-    // For now, sequential to keep the skeleton simple and testable.
-    for engine in engines {
+    for engine in &config.engines {
         let mut results = match engine {
-            Engine::Sast => sast::scan(code, &language).await?,
-            Engine::Sca => sca::scan(code, &language).await?,
-            Engine::Secrets => secrets::scan(code).await?,
-            Engine::AiCode => ai_code::scan(code, &language).await?,
+            Engine::Sast => crate::engines::sast::run(config).await?,
+            Engine::Sca => crate::engines::sca::run(config).await?,
+            Engine::Secrets => crate::engines::secrets::run(config).await?,
+            Engine::AiCode => crate::engines::ai_code::run(config).await?,
         };
         findings.append(&mut results);
     }
 
-    // Sort by severity descending (critical first)
+    // Sort by severity descending (critical first).
     findings.sort_by(|a, b| b.severity.cmp(&a.severity));
 
     Ok(findings)
-}
-
-// Engine sub-modules — each will grow into its own file as we implement them.
-mod sast {
-    use crate::{finding::Finding, language::Language};
-
-    pub async fn scan(_code: &str, _language: &Language) -> anyhow::Result<Vec<Finding>> {
-        // TODO: Implement Semgrep subprocess call
-        Ok(vec![])
-    }
-}
-
-mod sca {
-    use crate::{finding::Finding, language::Language};
-
-    pub async fn scan(_code: &str, _language: &Language) -> anyhow::Result<Vec<Finding>> {
-        // TODO: Parse dependency files and query OSV API
-        Ok(vec![])
-    }
-}
-
-mod secrets {
-    use crate::finding::Finding;
-
-    pub async fn scan(_code: &str) -> anyhow::Result<Vec<Finding>> {
-        // TODO: Implement Gitleaks regex patterns
-        Ok(vec![])
-    }
-}
-
-mod ai_code {
-    use crate::{finding::Finding, language::Language};
-
-    pub async fn scan(_code: &str, _language: &Language) -> anyhow::Result<Vec<Finding>> {
-        // TODO: AI-code specific pattern detection
-        Ok(vec![])
-    }
 }

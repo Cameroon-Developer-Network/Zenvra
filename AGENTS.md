@@ -22,9 +22,9 @@ Zenvra (`zenvra.dev`) is an AI-powered code vulnerability scanner. It scans code
 ```
 zenvra/
 ├── apps/
-│   └── web/              # Next.js 15 frontend — scanner UI, dashboard, auth, billing
+│   └── web/              # SvelteKit 5 frontend — scanner UI, dashboard, auth, billing
 ├── crates/
-│   ├── scanner/          # Rust core: SAST engine, SCA, secrets detection, CVE lookup
+│   ├── scanner/          # Rust core: SAST engine, SCA, secrets detection, CVE lookup, AI provider layer
 │   └── cli/              # Rust CLI: `zenvra scan`, `zenvra report`, `zenvra auth`
 ├── extensions/
 │   └── vscode/           # VS Code extension: inline diagnostics, hover fixes
@@ -38,19 +38,56 @@ zenvra/
 
 | Layer | Technology | Notes |
 |-------|-----------|-------|
-| Frontend | Next.js 15, TypeScript, Tailwind CSS | App Router. No Pages Router. |
-| UI components | shadcn/ui | Installed in apps/web/components/ui |
+| Frontend | SvelteKit 5, TypeScript, Tailwind CSS v4 | File-based routing. Svelte 5 runes syntax. |
 | Backend API | Rust, Axum | REST + SSE for streaming scan results |
 | Scan engine | Rust, Semgrep (via subprocess) | Custom rules in crates/scanner/rules/ |
-| Secrets detection | Rust, Gitleaks patterns | Compiled regex patterns |
-| AI explanations | Anthropic Claude API (claude-sonnet-4-20250514) | For CVE explanations and fix generation only |
+| Secrets detection | Rust, compiled regex patterns | Gitleaks-inspired patterns |
+| AI explanations | Multi-provider (Anthropic, OpenAI, Google, custom) | Bring-your-own-key supported. See AI Provider section. |
 | CVE database | NVD + OSV + GitHub Advisory DB | Synced daily via cron in scripts/sync-cve.sh |
-| Database | PostgreSQL 16 | Diesel ORM in Rust, Prisma in Next.js |
+| Database | PostgreSQL 16, sqlx | Compile-time checked async queries |
 | Cache / Queue | Redis 7 | Scan jobs via a simple queue pattern |
-| Auth | NextAuth.js v5 | GitHub + Google OAuth + email magic link |
+| Auth | TBD (SvelteKit-based) | GitHub + Google OAuth |
 | Payments | Stripe | Subscription billing |
 | CLI | Rust, Clap v4 | Produces single static binary |
 | VS Code ext | TypeScript, VS Code Extension API | LSP-style diagnostics |
+
+---
+
+## AI Provider System
+
+Zenvra supports multiple AI providers for generating vulnerability explanations and fix suggestions. Users can bring their own API key and even configure custom endpoints.
+
+### Supported Providers
+
+| Provider | Models | Notes |
+|----------|--------|-------|
+| Anthropic | claude-sonnet-4-20250514, etc. | Default provider |
+| OpenAI | gpt-4o, gpt-4o-mini, etc. | Also works for OpenAI-compatible APIs (Groq, Together, etc.) |
+| Google | gemini-2.0-flash, etc. | Gemini generateContent API |
+| Custom | User-defined | Any endpoint with OpenAI-compatible API format |
+
+### Configuration
+
+```env
+AI_PROVIDER=anthropic          # anthropic | openai | google | custom
+AI_API_KEY=sk-ant-...          # API key for the chosen provider
+AI_MODEL=claude-sonnet-4-20250514   # Model identifier
+AI_ENDPOINT=                   # Only needed for custom provider or non-default endpoints
+```
+
+### Architecture
+
+The `AiProvider` trait in `crates/scanner/src/ai/` defines the interface:
+
+```rust
+#[async_trait]
+pub trait AiProvider: Send + Sync {
+    async fn explain(&self, finding: &RawFinding) -> Result<String>;
+    async fn generate_fix(&self, finding: &RawFinding) -> Result<String>;
+}
+```
+
+Each provider (`AnthropicProvider`, `OpenAiProvider`, `GoogleProvider`, `CustomProvider`) implements this trait. Provider selection is config-driven via `AiConfig`.
 
 ---
 
@@ -65,11 +102,10 @@ zenvra/
 - Tests in `#[cfg(test)]` modules at bottom of each file
 - No `unsafe` without a comment explaining exactly why it's safe
 
-### TypeScript / Next.js
+### TypeScript / SvelteKit
 - TypeScript strict mode is ON — no `any`, no `@ts-ignore`
-- Named exports everywhere except Next.js page components
-- Server Components by default; add `"use client"` only when needed
-- API routes live in `apps/web/src/app/api/`
+- Named exports everywhere except SvelteKit page/layout components
+- Use Svelte 5 runes syntax (`$state`, `$derived`, `$effect`, `$props`)
 - No secrets or API keys ever in client-side code
 - All fetch calls go through typed API client functions in `apps/web/src/lib/api.ts`
 - Components max 200 lines — split into smaller ones if larger
@@ -93,11 +129,11 @@ API validates input + queues scan job (Redis)
 Rust scanner worker picks up job:
     ├── SAST: run Semgrep with Zenvra ruleset
     ├── SCA: parse dependency files → query OSV/NVD API
-    └── Secrets: scan with Gitleaks regex patterns
+    └── Secrets: scan with compiled regex patterns
     ↓
 Raw findings → CVE lookup (local DB + NVD fallback)
     ↓
-Claude API: generate plain-English explanation + corrected code
+AI Provider: generate plain-English explanation + corrected code
     ↓
 Results stored in PostgreSQL, streamed to client via SSE
     ↓
@@ -109,18 +145,16 @@ User sees: severity badge + CVE ID + explanation + fix + shareable card
 ## Key Domain Types (Rust)
 
 ```rust
-pub struct ScanJob {
-    pub id: Uuid,
+pub struct ScanConfig {
     pub code: String,
     pub language: Language,
-    pub engines: Vec<ScanEngine>, // Sast, Sca, Secrets
-    pub created_at: DateTime<Utc>,
+    pub engines: Vec<Engine>,
+    pub ai_config: Option<AiConfig>,
 }
 
 pub struct Finding {
     pub id: Uuid,
-    pub scan_id: Uuid,
-    pub engine: ScanEngine,
+    pub engine: Engine,
     pub cve_id: Option<String>,      // e.g. "CVE-2025-12345"
     pub cwe_id: Option<String>,      // e.g. "CWE-89"
     pub severity: Severity,          // Critical, High, Medium, Low, Info
@@ -134,7 +168,7 @@ pub struct Finding {
 }
 
 pub enum Severity { Critical, High, Medium, Low, Info }
-pub enum ScanEngine { Sast, Sca, Secrets, AiCode }
+pub enum Engine { Sast, Sca, Secrets, AiCode }
 pub enum Language { Python, JavaScript, TypeScript, Rust, Go, Java, /* ... */ }
 ```
 
@@ -149,15 +183,18 @@ Required in `.env` (see `.env.example`):
 DATABASE_URL=postgresql://localhost:5432/zenvra
 REDIS_URL=redis://localhost:6379
 
-# AI
-ANTHROPIC_API_KEY=sk-ant-...
+# AI Provider (multi-provider — see AI Provider System section)
+AI_PROVIDER=anthropic
+AI_API_KEY=sk-ant-...
+AI_MODEL=claude-sonnet-4-20250514
+AI_ENDPOINT=
 
 # CVE feeds
 NVD_API_KEY=...
 
-# Auth (Next.js)
-NEXTAUTH_SECRET=...
-NEXTAUTH_URL=http://localhost:3000
+# Auth (SvelteKit)
+AUTH_SECRET=change-me-in-production
+AUTH_URL=http://localhost:5173
 GITHUB_CLIENT_ID=...
 GITHUB_CLIENT_SECRET=...
 
@@ -171,8 +208,8 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 ## What NOT to Do
 
 - Do NOT use `unwrap()` or `expect()` in library/API code
-- Do NOT put business logic in React components — it goes in server actions or API routes
-- Do NOT call the Claude API for anything other than explanation + fix generation (it's expensive)
+- Do NOT put business logic in Svelte components — it goes in server-side load functions or API routes
+- Do NOT call the AI API for anything other than explanation + fix generation (it's expensive)
 - Do NOT store raw code in the database longer than needed — scan results only
 - Do NOT add dependencies without discussion — keep the dependency tree lean
 - Do NOT break the existing API contract without a migration plan
@@ -182,7 +219,7 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 ## Current Status
 
-This repository is in **initial setup phase**. The structure, CI, and issue templates are being established. No production code exists yet. First milestone: working web paste scanner (MVP).
+This repository is in **active MVP development**. The scan engine foundation, multi-AI provider system, and secrets detection are being built. First milestone: working CLI scanner + web paste UI.
 
 When in doubt about a decision, open a GitHub Discussion rather than assuming. We build deliberately.
 

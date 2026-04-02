@@ -1,0 +1,17 @@
+# Global owners — all PRs require review from at least one of these
+* @Cameroon-Developer-Network/zenvra-core
+
+# Rust crates — require Rust reviewer
+/crates/ @Cameroon-Developer-Network/zenvra-rust
+
+# Frontend — require frontend reviewer
+/apps/web/ @Cameroon-Developer-Network/zenvra-frontend
+
+# VS Code extension
+/extensions/vscode/ @Cameroon-Developer-Network/zenvra-frontend
+
+# CI / workflows — require extra scrutiny
+/.github/ @Cameroon-Developer-Network/zenvra-core
+
+# Security-sensitive: scan engine and CVE code
+/crates/scanner/ @Cameroon-Developer-Network/zenvra-security

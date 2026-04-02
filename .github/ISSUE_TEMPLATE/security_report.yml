@@ -1,0 +1,70 @@
+name: Security Vulnerability (in Zenvra itself)
+description: Report a security vulnerability IN Zenvra — not a vulnerability Zenvra found in your code
+title: "[SECURITY] "
+labels: ["security", "confidential"]
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ⚠️ **If this is a critical vulnerability, please email security@zenvra.dev instead of filing a public issue.**
+
+        This template is for reporting security vulnerabilities **in Zenvra's own code** (e.g. XSS in the web UI, auth bypass in the API, RCE in the scanner). Thank you for helping keep the community safe.
+
+  - type: dropdown
+    id: type
+    attributes:
+      label: Vulnerability type
+      options:
+        - Authentication / Authorization bypass
+        - Remote Code Execution (RCE)
+        - SQL Injection
+        - Cross-Site Scripting (XSS)
+        - Information disclosure / data leak
+        - Denial of Service (DoS)
+        - Supply chain / dependency
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Estimated severity
+      options:
+        - Critical (CVSS 9.0+)
+        - High (CVSS 7.0–8.9)
+        - Medium (CVSS 4.0–6.9)
+        - Low (CVSS < 4.0)
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Describe the vulnerability clearly. Include affected component, attack vector, and impact.
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a proof-of-concept if possible.
+    validations:
+      required: true
+
+  - type: textarea
+    id: fix
+    attributes:
+      label: Suggested fix (optional)
+      description: If you have an idea for how to fix it, share it here.
+
+  - type: checkboxes
+    id: disclosure
+    attributes:
+      label: Responsible disclosure
+      options:
+        - label: I agree to give the Zenvra team reasonable time to patch this before public disclosure
+          required: true

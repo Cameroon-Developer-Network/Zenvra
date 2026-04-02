@@ -1,0 +1,79 @@
+{
+  "name": "zenvra",
+  "displayName": "Zenvra — Security Scanner",
+  "description": "AI-powered code vulnerability scanner. Detects CVEs, explains risks in plain English, and suggests fixes — inline as you code.",
+  "version": "0.1.0",
+  "publisher": "cameroon-developer-network",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Cameroon-Developer-Network/zenvra"
+  },
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Linters", "Other"],
+  "keywords": ["security", "vulnerability", "cve", "scanner", "sast"],
+  "icon": "assets/icon.png",
+  "activationEvents": ["onStartupFinished"],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "zenvra.scanFile",
+        "title": "Zenvra: Scan Current File"
+      },
+      {
+        "command": "zenvra.scanWorkspace",
+        "title": "Zenvra: Scan Entire Workspace"
+      },
+      {
+        "command": "zenvra.setApiToken",
+        "title": "Zenvra: Set API Token"
+      }
+    ],
+    "configuration": {
+      "title": "Zenvra",
+      "properties": {
+        "zenvra.apiToken": {
+          "type": "string",
+          "default": "",
+          "description": "Your Zenvra API token from zenvra.dev/settings"
+        },
+        "zenvra.minSeverity": {
+          "type": "string",
+          "default": "medium",
+          "enum": ["info", "low", "medium", "high", "critical"],
+          "description": "Minimum severity level to show inline"
+        },
+        "zenvra.scanOnSave": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan files when saved"
+        },
+        "zenvra.engines": {
+          "type": "array",
+          "default": ["sast", "secrets", "ai_code"],
+          "description": "Which scan engines to run"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.90.0",
+    "@types/node": "20.x",
+    "@typescript-eslint/eslint-plugin": "^7.0.0",
+    "@typescript-eslint/parser": "^7.0.0",
+    "eslint": "^9.0.0",
+    "typescript": "^5.4.0",
+    "@vscode/test-electron": "^2.4.0",
+    "@vscode/vsce": "^3.0.0"
+  }
+}

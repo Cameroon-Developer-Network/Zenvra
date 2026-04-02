@@ -5,10 +5,10 @@
 
 # Rust
 /target
-Cargo.lock
 
-# Node / Next.js
+# Node / SvelteKit
 node_modules
+.svelte-kit
 .next
 out
 dist

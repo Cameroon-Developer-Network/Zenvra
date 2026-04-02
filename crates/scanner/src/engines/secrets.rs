@@ -186,6 +186,7 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
                     severity: pattern.severity.clone(),
                     title: format!("Hardcoded {} detected", pattern.name),
                     vulnerable_code: line.to_string(),
+                    description: None,
                     line_start: line_number,
                     line_end: line_number,
                     file_path: config.file_path.clone(),

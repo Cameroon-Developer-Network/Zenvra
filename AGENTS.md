@@ -25,6 +25,7 @@ zenvra/
 │   └── web/              # SvelteKit 5 frontend — scanner UI, dashboard, auth, billing
 ├── crates/
 │   ├── scanner/          # Rust core: SAST engine, SCA, secrets detection, CVE lookup, AI provider layer
+│   ├── server/           # Rust API: Axum-based REST server for web integration
 │   └── cli/              # Rust CLI: `zenvra scan`, `zenvra report`, `zenvra auth`
 ├── extensions/
 │   └── vscode/           # VS Code extension: inline diagnostics, hover fixes
@@ -219,9 +220,11 @@ STRIPE_WEBHOOK_SECRET=whsec_...
 
 ## Current Status
 
-This repository is in **active MVP development**. The scan engine foundation, multi-AI provider system, and secrets detection are being built. First milestone: working CLI scanner + web paste UI.
+This repository is in **active MVP development**. 
+- **Phase 1 (Core Foundation)**: COMPLETE. Includes scan engine, AI provider system, and secrets detection.
+- **Phase 2 (Frontend & API Integration)**: COMPLETE. Includes Axum API server and SvelteKit 5 dashboard.
 
-When in doubt about a decision, open a GitHub Discussion rather than assuming. We build deliberately.
+Next milestone: Phase 3 (SSE Streaming & Backend Polish).
 
 ---
 

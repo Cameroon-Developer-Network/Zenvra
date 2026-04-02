@@ -1,0 +1,89 @@
+name: Bug Report
+description: Something is broken — help us fix it
+title: "fix: "
+labels: ["bug", "needs-triage"]
+assignees: []
+
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Fill in as much detail as you can.
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Which component is affected?
+      options:
+        - Web UI (zenvra.dev)
+        - CLI tool (`zenvra scan`)
+        - VS Code extension
+        - GitHub Action
+        - Scan engine (false positive / missed vulnerability)
+        - API / backend
+        - Other
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: "When I scan a Python file with X pattern, the scanner..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+      placeholder: "I expected Zenvra to..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps to reproduce the bug. Include a code sample if relevant (remove any real secrets before posting).
+      placeholder: |
+        1. Go to zenvra.dev
+        2. Paste the following code...
+        3. Click Scan
+        4. See error
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Zenvra version (if CLI)
+      placeholder: "e.g. 0.1.2 — run `zenvra --version`"
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system (if CLI or VS Code)
+      options:
+        - Linux
+        - macOS
+        - Windows
+        - Not applicable (web only)
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      render: shell
+      placeholder: Paste any error messages, stack traces, or CLI output here.
+
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues and this is not a duplicate
+          required: true
+        - label: I have removed any real secrets or sensitive data from the report
+          required: true

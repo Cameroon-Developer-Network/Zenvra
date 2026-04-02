@@ -1,0 +1,117 @@
+# Bug / issue types
+- name: bug
+  color: "d73a4a"
+  description: Something is broken
+
+- name: enhancement
+  color: "a2eeef"
+  description: New feature or improvement
+
+- name: security
+  color: "e4e669"
+  description: Security vulnerability or hardening
+
+- name: documentation
+  color: "0075ca"
+  description: Documentation changes
+
+- name: performance
+  color: "f9a825"
+  description: Performance improvement
+
+- name: chore
+  color: "e0e0e0"
+  description: Maintenance, dependencies, CI
+
+# Status
+- name: needs-triage
+  color: "ededed"
+  description: Awaiting initial review and labelling
+
+- name: needs-design
+  color: "f4e542"
+  description: Requires design decision before implementation
+
+- name: in-progress
+  color: "0052cc"
+  description: Actively being worked on
+
+- name: ready-for-review
+  color: "0e8a16"
+  description: Implementation complete, needs code review
+
+- name: blocked
+  color: "b60205"
+  description: Blocked on something else
+
+- name: wont-fix
+  color: "ffffff"
+  description: Will not be addressed
+
+- name: duplicate
+  color: "cfd3d7"
+  description: This issue or PR already exists
+
+# Component
+- name: component:scanner
+  color: "5319e7"
+  description: Rust scanner engine
+
+- name: component:cli
+  color: "5319e7"
+  description: CLI tool
+
+- name: component:web
+  color: "1d76db"
+  description: Web frontend
+
+- name: component:vscode
+  color: "1d76db"
+  description: VS Code extension
+
+- name: component:ci
+  color: "e0e0e0"
+  description: CI / GitHub Actions
+
+# Priority
+- name: priority:critical
+  color: "b60205"
+  description: Must fix immediately
+
+- name: priority:high
+  color: "d73a4a"
+  description: High priority
+
+- name: priority:medium
+  color: "f9a825"
+  description: Medium priority
+
+- name: priority:low
+  color: "0e8a16"
+  description: Low priority
+
+# Size (for PRs)
+- name: size:small
+  color: "c2e0c6"
+  description: "Small PR: < 100 lines"
+
+- name: size:medium
+  color: "fef2c0"
+  description: "Medium PR: 100-500 lines"
+
+- name: size:large
+  color: "f9d0c4"
+  description: "Large PR: > 500 lines — consider splitting"
+
+# Special
+- name: good-first-issue
+  color: "7057ff"
+  description: Good for newcomers to the project
+
+- name: help-wanted
+  color: "008672"
+  description: Extra attention needed — community welcome
+
+- name: confidential
+  color: "b60205"
+  description: Security report — do not discuss publicly

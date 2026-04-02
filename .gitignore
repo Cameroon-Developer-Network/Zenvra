@@ -1,0 +1,34 @@
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Rust
+/target
+Cargo.lock
+
+# Node / Next.js
+node_modules
+.next
+out
+dist
+
+# VS Code extension output
+extensions/vscode/out
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test output
+coverage
+*.lcov
+
+# Editor
+.idea
+*.swp
+*.swo

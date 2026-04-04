@@ -20,9 +20,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     webviewView.webview.html = this._getHtmlForWebview(webviewView.webview);
 
     webviewView.webview.onDidReceiveMessage(async (data) => {
+      console.log('Sidebar received message:', data.type);
       switch (data.type) {
         case 'onScan': {
           vscode.commands.executeCommand('zenvra.scanFile');
+          break;
+        }
+        case 'onSettings': {
+          vscode.commands.executeCommand('workbench.action.openSettings', 'zenvra');
           break;
         }
         case 'onInfo': {
@@ -155,7 +160,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         vscode.postMessage({ type: 'onScan' });
                     });
                     document.getElementById('settings-btn').addEventListener('click', () => {
-                        vscode.postMessage({ type: 'onInfo', value: 'Configure Zenvra in VS Code Settings' });
+                        vscode.postMessage({ type: 'onSettings' });
                     });
                 </script>
 			</body>

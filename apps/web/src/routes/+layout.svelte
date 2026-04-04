@@ -15,7 +15,7 @@
 <svelte:head>
   <title>Zenvra — AI Code Security Scanner</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet" />
 </svelte:head>
 
@@ -32,7 +32,7 @@
     </div>
 
     <nav class="flex-1 px-4 py-4 space-y-1">
-      {#each navItems as item}
+      {#each navItems as item (item.name)}
         <a 
           href={item.href} 
           class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 group {page.url.pathname === item.href ? 'bg-brand-primary/10 text-brand-primary' : 'hover:bg-white/5 text-zinc-400 hover:text-zinc-100'}"

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from "svelte";
 
   let code = $state(`// Paste your code here to scan for vulnerabilities
 def insecure_database_query(user_id):
@@ -12,8 +11,20 @@ def insecure_database_query(user_id):
     
     return cursor.fetchone()`);
 
+  interface Finding {
+    id: string;
+    severity: string;
+    cwe_id?: string;
+    title: string;
+    line_start: number;
+    description?: string;
+    explanation?: string;
+    vulnerable_code: string;
+    fixed_code?: string;
+  }
+
   let isScanning = $state(false);
-  let findings = $state<any[]>([]);
+  let findings = $state<Finding[]>([]);
   let provider = $state("anthropic");
   let model = $state("claude-sonnet-4-20250514");
 
@@ -142,7 +153,7 @@ def insecure_database_query(user_id):
               <p class="text-sm font-medium">Ready to scan. Paste your code on the left.</p>
             </div>
           {:else}
-            {#each findings as finding}
+            {#each findings as finding (finding.id || Math.random())}
               <div class="p-4 glass-card border-zinc-800 slide-in-from-right-4 animate-in duration-300">
                 <div class="flex items-start justify-between gap-4 mb-3">
                   <div class="flex-1">

@@ -37,7 +37,7 @@
 
   <!-- Stats Grid -->
   <section class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-    {#each stats as stat}
+    {#each stats as stat (stat.label)}
       <div class="glass-card p-6 flex flex-col justify-between hover:translate-y-[-4px]">
         <div class="flex items-center justify-between mb-4">
           <span class="text-sm font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</span>
@@ -68,7 +68,7 @@
             </tr>
           </thead>
           <tbody class="divide-y divide-border">
-            {#each recentScans as scan}
+            {#each recentScans as scan (scan.id)}
               <tr class="hover:bg-white/5 transition-colors cursor-pointer group">
                 <td class="px-6 py-4 font-medium">{scan.project}</td>
                 <td class="px-6 py-4 text-center text-zinc-400">{scan.findings}</td>
@@ -93,7 +93,7 @@
     <section class="space-y-6">
       <h2 class="text-xl font-bold font-outfit">Active Providers</h2>
       <div class="space-y-4">
-        {#each ['Anthropic', 'OpenAI', 'Google', 'Custom'] as provider}
+        {#each ['Anthropic', 'OpenAI', 'Google', 'Custom'] as provider (provider)}
           <div class="glass-card p-4 flex items-center justify-between group {provider === 'Anthropic' ? 'border-brand-primary/30' : ''}">
             <div class="flex items-center gap-3">
               <div class="w-10 h-10 rounded-xl glass flex items-center justify-center {provider === 'Anthropic' ? 'bg-brand-primary/5 text-brand-primary' : 'text-zinc-500 group-hover:text-zinc-200'}">

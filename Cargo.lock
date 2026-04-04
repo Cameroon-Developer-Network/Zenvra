@@ -2239,7 +2239,7 @@ dependencies = [
 
 [[package]]
 name = "zenvra-cli"
-version = "0.1.0"
+version = "0.1.1-rc.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2256,7 +2256,7 @@ dependencies = [
 
 [[package]]
 name = "zenvra-scanner"
-version = "0.1.0"
+version = "0.1.1-rc.1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2274,7 +2274,7 @@ dependencies = [
 
 [[package]]
 name = "zenvra-server"
-version = "0.1.0"
+version = "0.1.1-rc.1"
 dependencies = [
  "anyhow",
  "axum",

@@ -2,7 +2,7 @@
   "name": "zenvra",
   "displayName": "Zenvra — Security Scanner",
   "description": "AI-powered code vulnerability scanner. Detects CVEs, explains risks in plain English, and suggests fixes — inline as you code.",
-  "version": "0.1.0",
+  "version": "0.1.1-rc.1",
   "publisher": "cameroon-developer-network",
   "license": "MIT",
   "repository": {
@@ -12,10 +12,21 @@
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["Linters", "Other"],
-  "keywords": ["security", "vulnerability", "cve", "scanner", "sast"],
+  "categories": [
+    "Linters",
+    "Other"
+  ],
+  "keywords": [
+    "security",
+    "vulnerability",
+    "cve",
+    "scanner",
+    "sast"
+  ],
   "icon": "assets/icon.png",
-  "activationEvents": ["onStartupFinished"],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
@@ -43,7 +54,13 @@
         "zenvra.minSeverity": {
           "type": "string",
           "default": "medium",
-          "enum": ["info", "low", "medium", "high", "critical"],
+          "enum": [
+            "info",
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ],
           "description": "Minimum severity level to show inline"
         },
         "zenvra.scanOnSave": {
@@ -53,7 +70,11 @@
         },
         "zenvra.engines": {
           "type": "array",
-          "default": ["sast", "secrets", "ai_code"],
+          "default": [
+            "sast",
+            "secrets",
+            "ai_code"
+          ],
           "description": "Which scan engines to run"
         }
       }
@@ -62,18 +83,22 @@
   "scripts": {
     "compile": "tsc -p ./",
     "watch": "tsc -watch -p ./",
-    "lint": "eslint src --ext ts",
+    "lint": "eslint src",
     "test": "node ./out/test/runTest.js",
     "package": "vsce package"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "20.x",
+    "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^7.0.0",
     "@typescript-eslint/parser": "^7.0.0",
-    "eslint": "^9.0.0",
-    "typescript": "^5.4.0",
     "@vscode/test-electron": "^2.4.0",
-    "@vscode/vsce": "^3.0.0"
-  }
+    "@vscode/vsce": "^3.0.0",
+    "eslint": "^9.0.0",
+    "globals": "^17.4.0",
+    "typescript": "^5.4.0",
+    "typescript-eslint": "^8.58.0"
+  },
+  "packageManager": "pnpm@10.24.0+sha512.01ff8ae71b4419903b65c60fb2dc9d34cf8bb6e06d03bde112ef38f7a34d6904c424ba66bea5cdcf12890230bf39f9580473140ed9c946fef328b6e5238a345a"
 }

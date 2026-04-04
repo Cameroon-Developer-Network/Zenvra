@@ -70,8 +70,7 @@ enum Commands {
 async fn main() -> Result<()> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::from_default_env()
-                .add_directive("zenvra=info".parse()?),
+            tracing_subscriber::EnvFilter::from_default_env().add_directive("zenvra=info".parse()?),
         )
         .init();
 
@@ -176,10 +175,7 @@ async fn cmd_scan(
     let mut all_findings: Vec<Finding> = Vec::new();
 
     for (file_path, content) in &files {
-        let ext = file_path
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("");
+        let ext = file_path.extension().and_then(|e| e.to_str()).unwrap_or("");
         let language = Language::from_extension(ext);
 
         let config = ScanConfig {
@@ -246,7 +242,9 @@ fn build_ai_config(
         "openai" => ProviderKind::OpenAi,
         "google" => ProviderKind::Google,
         "custom" => ProviderKind::Custom,
-        other => anyhow::bail!("Unknown AI provider: {other}. Use: anthropic, openai, google, custom"),
+        other => {
+            anyhow::bail!("Unknown AI provider: {other}. Use: anthropic, openai, google, custom")
+        }
     };
 
     let model_name = model
@@ -277,17 +275,14 @@ fn collect_files(path: &PathBuf) -> Result<Vec<(PathBuf, String)>> {
             std::fs::read_to_string(path).context(format!("Failed to read {}", path.display()))?;
         files.push((path.clone(), content));
     } else if path.is_dir() {
-        for entry in walkdir::WalkDir::new(path)
-            .into_iter()
-            .filter_entry(|e| {
-                let name = e.file_name().to_string_lossy();
-                // Skip common non-source directories.
-                !matches!(
-                    name.as_ref(),
-                    ".git" | "node_modules" | "target" | ".venv" | "__pycache__" | "dist" | "build"
-                )
-            })
-        {
+        for entry in walkdir::WalkDir::new(path).into_iter().filter_entry(|e| {
+            let name = e.file_name().to_string_lossy();
+            // Skip common non-source directories.
+            !matches!(
+                name.as_ref(),
+                ".git" | "node_modules" | "target" | ".venv" | "__pycache__" | "dist" | "build"
+            )
+        }) {
             let entry = entry?;
             if entry.file_type().is_file() {
                 // Only scan text-like files by extension.

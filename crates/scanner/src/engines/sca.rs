@@ -2,7 +2,7 @@
 //!
 //! Parses lockfiles and queries OSV/NVD for known CVEs.
 
-use crate::{ScanConfig, finding::RawFinding};
+use crate::{finding::RawFinding, ScanConfig};
 use anyhow::Result;
 
 /// Run SCA analysis — parse dependency files and check for known vulnerabilities.

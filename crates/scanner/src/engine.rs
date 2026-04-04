@@ -1,6 +1,6 @@
 //! Scan engine orchestrator — runs all requested engines and merges results.
 
-use crate::{ScanConfig, finding::RawFinding};
+use crate::{finding::RawFinding, ScanConfig};
 use serde::{Deserialize, Serialize};
 
 /// Scan engines available in Zenvra.

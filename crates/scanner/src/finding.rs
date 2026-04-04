@@ -25,7 +25,7 @@ pub struct RawFinding {
 
     /// The vulnerable code snippet.
     pub vulnerable_code: String,
-
+    pub description: Option<String>,
     pub line_start: u32,
     pub line_end: u32,
     pub file_path: Option<String>,
@@ -44,6 +44,7 @@ impl RawFinding {
             explanation,
             vulnerable_code: self.vulnerable_code,
             fixed_code,
+            description: self.description,
             line_start: self.line_start,
             line_end: self.line_end,
             file_path: self.file_path,
@@ -78,6 +79,7 @@ pub struct Finding {
     /// AI-generated corrected version of the code.
     pub fixed_code: String,
 
+    pub description: Option<String>,
     pub line_start: u32,
     pub line_end: u32,
     pub file_path: Option<String>,

@@ -1,6 +1,7 @@
 //! Supported programming languages.
 
 use serde::{Deserialize, Serialize};
+use std::str::FromStr;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -40,5 +41,28 @@ impl Language {
             "kt" | "kts" => Self::Kotlin,
             _ => Self::Unknown,
         }
+    }
+}
+
+impl FromStr for Language {
+    type Err = std::convert::Infallible;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(match s.to_lowercase().as_str() {
+            "python" | "py" => Self::Python,
+            "javascript" | "js" => Self::JavaScript,
+            "typescript" | "ts" => Self::TypeScript,
+            "rust" | "rs" => Self::Rust,
+            "go" | "golang" => Self::Go,
+            "java" => Self::Java,
+            "csharp" | "cs" => Self::CSharp,
+            "cpp" | "c++" => Self::Cpp,
+            "c" => Self::C,
+            "ruby" | "rb" => Self::Ruby,
+            "php" => Self::Php,
+            "swift" => Self::Swift,
+            "kotlin" | "kt" => Self::Kotlin,
+            _ => Self::Unknown,
+        })
     }
 }

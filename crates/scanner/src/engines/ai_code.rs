@@ -2,7 +2,7 @@
 //!
 //! Detects common vulnerabilities introduced by AI code generators.
 
-use crate::{ScanConfig, finding::RawFinding};
+use crate::{finding::RawFinding, ScanConfig};
 use anyhow::Result;
 
 /// Run AI-code-specific pattern detection.

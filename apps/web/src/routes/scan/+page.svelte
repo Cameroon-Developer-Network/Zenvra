@@ -12,13 +12,18 @@ def get_user(user_id):
     
     return db.fetchone()`);
 
-  let apiKey = $state("");
-
-
   let isScanning = $state(false);
   let findings = $state<Finding[]>([]);
   let provider = $state("anthropic");
   let model = $state("claude-sonnet-4-20250514");
+  let apiKey = $state("");
+
+  import { onMount } from "svelte";
+  onMount(() => {
+    provider = localStorage.getItem('zenvra_ai_provider') || "anthropic";
+    model = localStorage.getItem('zenvra_ai_model') || "claude-sonnet-4-20250514";
+    apiKey = localStorage.getItem('zenvra_ai_api_key') || "";
+  });
 
   const runScan = async () => {
     isScanning = true;
@@ -147,38 +152,70 @@ def get_user(user_id):
             </div>
           {:else}
             {#each findings as finding (finding.id || Math.random())}
-              <div class="p-4 glass-card border-zinc-800 slide-in-from-right-4 animate-in duration-300">
-                <div class="flex items-start justify-between gap-4 mb-3">
+              <div class="p-5 glass-card border-zinc-800 slide-in-from-right-4 animate-in duration-300">
+                <div class="flex items-start justify-between gap-4 mb-4">
                   <div class="flex-1">
-                    <div class="flex items-center gap-2 mb-1">
+                    <div class="flex items-center gap-2 mb-2">
                       <span class="text-[10px] font-black px-1.5 py-0.5 rounded {getSeverityColor(finding.severity)} uppercase tracking-tighter">
                         {finding.severity}
                       </span>
-                      <span class="text-xs font-bold text-zinc-500">#{finding.cwe_id || 'UNKNOWN'}</span>
+                      {#if finding.cve_id}
+                        <a 
+                          href="https://nvd.nist.gov/vuln/detail/{finding.cve_id}" 
+                          target="_blank" 
+                          class="text-[10px] font-bold text-brand-primary bg-brand-primary/10 px-1.5 py-0.5 rounded hover:bg-brand-primary/20 transition-colors uppercase"
+                        >
+                          {finding.cve_id}
+                        </a>
+                      {/if}
+                      <span class="text-xs font-bold text-zinc-600">#{finding.cwe_id || 'CWE-UNKNOWN'}</span>
                     </div>
-                    <h3 class="font-bold text-sm leading-tight text-zinc-200">{finding.title}</h3>
+                    <h3 class="font-bold text-base leading-tight text-zinc-100">{finding.title}</h3>
                   </div>
-                  <div class="text-[10px] font-medium text-zinc-500 bg-zinc-800/50 px-2 py-1 rounded">
+                  <div class="text-[10px] font-mono text-zinc-500 bg-zinc-900/80 border border-zinc-800 px-2.5 py-1 rounded-md shadow-inner">
                     Line {finding.line_start}
                   </div>
                 </div>
                 
-                <p class="text-xs text-zinc-400 leading-relaxed mb-4">
-                  {finding.description || finding.explanation || "No description provided."}
-                </p>
-
-                <div class="bg-black/50 rounded-lg p-3 border border-zinc-800/50 font-mono text-[11px] text-zinc-500 overflow-x-auto whitespace-pre">
-                  {finding.vulnerable_code}
-                </div>
-                
-                {#if finding.fixed_code}
-                  <div class="mt-4 flex flex-col gap-2">
-                    <p class="text-[10px] font-bold text-emerald-500 uppercase tracking-widest">Suggested Fix</p>
-                    <div class="bg-emerald-500/5 rounded-lg p-3 border border-emerald-500/20 font-mono text-[11px] text-emerald-400 overflow-x-auto whitespace-pre">
-                      {finding.fixed_code}
+                {#if finding.description && finding.description !== finding.explanation}
+                  <div class="mb-4 p-3 bg-zinc-900/50 rounded-xl border border-zinc-800/50 relative overflow-hidden group">
+                    <div class="absolute top-0 right-0 p-2 opacity-10 group-hover:opacity-20 transition-opacity">
+                      <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>
                     </div>
+                    <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-1.5 flex items-center gap-1.5">
+                      <span class="w-1.5 h-1.5 rounded-full bg-brand-primary animate-pulse"></span>
+                      Official NVD Context
+                    </p>
+                    <p class="text-xs text-zinc-400 leading-relaxed italic">
+                      "{finding.description}"
+                    </p>
                   </div>
                 {/if}
+
+                <div class="space-y-4">
+                  <div>
+                    <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest mb-2">Technical Analysis</p>
+                    <p class="text-xs text-zinc-400 leading-relaxed">
+                      {finding.explanation || "No technical explanation available."}
+                    </p>
+                  </div>
+
+                  <div class="bg-black/50 rounded-lg p-3 border border-zinc-800/50 font-mono text-[11px] text-zinc-500 overflow-x-auto whitespace-pre custom-scrollbar">
+                    {finding.vulnerable_code}
+                  </div>
+                  
+                  {#if finding.fixed_code}
+                    <div class="flex flex-col gap-2 pt-2 border-t border-zinc-800/50">
+                      <p class="text-[10px] font-bold text-emerald-500 uppercase tracking-widest flex items-center gap-2">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+                        Security Benchmark Fix
+                      </p>
+                      <div class="bg-emerald-500/5 rounded-lg p-3 border border-emerald-500/20 font-mono text-[11px] text-emerald-400/90 overflow-x-auto whitespace-pre custom-scrollbar">
+                        {finding.fixed_code}
+                      </div>
+                    </div>
+                  {/if}
+                </div>
               </div>
             {/each}
           {/if}

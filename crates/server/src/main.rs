@@ -91,6 +91,8 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/scan", post(run_scan))
+        .route("/api/v1/history", get(get_history))
+        .route("/api/v1/sync", post(trigger_sync))
         .with_state(state)
         .layer(cors);
 
@@ -143,7 +145,12 @@ async fn run_scan(
     };
 
     // Enrich findings with local CVE metadata
+    let mut severity_counts = std::collections::HashMap::new();
+
     for finding in &mut findings {
+        let sev_str = finding.severity.to_string().to_lowercase();
+        *severity_counts.entry(sev_str).or_insert(0) += 1;
+
         if let Some(cve_id) = &finding.cve_id {
             let db_finding = sqlx::query(
                 "SELECT title, description, severity FROM vulnerabilities WHERE cve_id = $1"
@@ -156,7 +163,6 @@ async fn run_scan(
                 use sqlx::Row;
                 finding.title = row.get("title");
                 finding.description = Some(row.get("description"));
-                // Map severity string to enum (simplified for now)
                 let severity: String = row.get("severity");
                 finding.severity = match severity.to_lowercase().as_str() {
                     "critical" => zenvra_scanner::Severity::Critical,
@@ -169,5 +175,81 @@ async fn run_scan(
         }
     }
 
+    // Persist scan history
+    let scan_id = match sqlx::query(
+        "INSERT INTO scans (language, target_name, findings_count, severity_counts) 
+         VALUES ($1, $2, $3, $4) RETURNING id"
+    )
+    .bind(payload.language)
+    .bind("Manual Scan")
+    .bind(findings.len() as i32)
+    .bind(serde_json::to_value(&severity_counts).unwrap_or_default())
+    .fetch_one(&_state.db)
+    .await {
+        Ok(row) => {
+            use sqlx::Row;
+            row.get::<uuid::Uuid, _>("id")
+        },
+        Err(e) => {
+            tracing::error!("Failed to save scan history: {}", e);
+            uuid::Uuid::new_v4() // Fallback to avoid breaking the scan
+        }
+    };
+
+    // Save individual results
+    for finding in &findings {
+        let _ = sqlx::query(
+            "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+        )
+        .bind(scan_id)
+        .bind(format!("{:?}", finding.engine))
+        .bind(&finding.cve_id)
+        .bind(&finding.cwe_id)
+        .bind(finding.severity.to_string())
+        .bind(&finding.title)
+        .bind(&finding.description)
+        .bind(&finding.vulnerable_code)
+        .bind(&finding.fixed_code)
+        .bind(finding.line_start as i32)
+        .bind(finding.line_end as i32)
+        .bind(&finding.file_path)
+        .execute(&_state.db)
+        .await;
+    }
+
     Ok(Json(findings))
+}
+
+async fn get_history(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    let scans = sqlx::query("SELECT * FROM scans ORDER BY created_at DESC LIMIT 50")
+        .fetch_all(&state.db)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut results = Vec::new();
+    for row in scans {
+        use sqlx::Row;
+        results.push(serde_json::json!({
+            "id": row.get::<uuid::Uuid, _>("id"),
+            "language": row.get::<String, _>("language"),
+            "target_name": row.get::<Option<String>, _>("target_name"),
+            "findings_count": row.get::<i32, _>("findings_count"),
+            "severity_counts": row.get::<serde_json::Value, _>("severity_counts"),
+            "created_at": row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+        }));
+    }
+
+    Ok(Json(serde_json::Value::Array(results)))
+}
+
+async fn trigger_sync(
+    State(state): State<Arc<AppState>>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    match cve_sync::sync_all(&state.db).await {
+        Ok(_) => Ok(Json(serde_json::json!({"status": "success", "message": "Synchronization completed"}))),
+        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Sync failed: {}", e))),
+    }
 }

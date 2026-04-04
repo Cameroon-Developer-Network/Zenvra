@@ -6,9 +6,9 @@
   const navItems = [
     { name: "Dashboard", href: "/", icon: "layout-grid", disabled: false },
     { name: "Scan Code", href: "/scan", icon: "search", disabled: false },
-    { name: "Scan History", href: "/history", icon: "clock", disabled: true },
-    { name: "CVE Settings", href: "/settings/cve", icon: "database", disabled: true },
-    { name: "AI Settings", href: "/settings/ai", icon: "sparkles", disabled: true },
+    { name: "Scan History", href: "/history", icon: "clock", disabled: false },
+    { name: "CVE Settings", href: "/settings/cve", icon: "database", disabled: false },
+    { name: "AI Settings", href: "/settings/ai", icon: "sparkles", disabled: false },
   ];
 </script>
 

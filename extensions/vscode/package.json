@@ -24,25 +24,45 @@
     "sast"
   ],
   "icon": "assets/icon.png",
-  "activationEvents": [
-    "onStartupFinished"
-  ],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
         "command": "zenvra.scanFile",
-        "title": "Zenvra: Scan Current File"
+        "title": "Zenvra: Scan Current File",
+        "category": "Zenvra"
       },
       {
         "command": "zenvra.scanWorkspace",
-        "title": "Zenvra: Scan Entire Workspace"
+        "title": "Zenvra: Scan Entire Workspace",
+        "category": "Zenvra"
       },
       {
         "command": "zenvra.setApiToken",
-        "title": "Zenvra: Set API Token"
+        "title": "Zenvra: Set API Token",
+        "category": "Zenvra"
       }
     ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "zenvra-sidebar",
+          "title": "Zenvra",
+          "icon": "assets/icon.png"
+        }
+      ]
+    },
+    "views": {
+      "zenvra-sidebar": [
+        {
+          "type": "webview",
+          "id": "zenvraMain",
+          "name": "Zenvra Scanner",
+          "icon": "assets/icon.png"
+        }
+      ]
+    },
     "configuration": {
       "title": "Zenvra",
       "properties": {

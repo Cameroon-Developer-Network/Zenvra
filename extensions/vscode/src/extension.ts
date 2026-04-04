@@ -1,11 +1,17 @@
 import * as vscode from 'vscode';
 import { Finding, ScanRequest } from './types';
+import { SidebarProvider } from './sidebarProvider';
 
 const DIAGNOSTIC_SOURCE = 'Zenvra';
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('zenvra');
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('Zenvra extension activated');
+
+  const sidebarProvider = new SidebarProvider(context.extensionUri);
+  context.subscriptions.push(
+    vscode.window.registerWebviewViewProvider('zenvraMain', sidebarProvider)
+  );
 
   // Register commands
   context.subscriptions.push(

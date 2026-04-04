@@ -1,12 +1,13 @@
 //! Zenvra API Server — provides REST + SSE endpoints for the web frontend.
 
 use axum::{
+    http::StatusCode,
     routing::{get, post},
     Json, Router,
 };
 use serde::{Deserialize, Serialize};
-use tower_http::cors::CorsLayer;
-use zenvra_scanner::{Finding, ScanConfig};
+use tower_http::cors::{Any, CorsLayer};
+use zenvra_scanner::{Finding, Language, ScanConfig};
 
 #[derive(Debug, Serialize, Deserialize)]
 struct ScanRequest {
@@ -25,10 +26,15 @@ async fn main() -> anyhow::Result<()> {
         )
         .init();
 
+    let cors = CorsLayer::new()
+        .allow_origin(Any) // In production, replace with specific origins
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/scan", post(run_scan))
-        .layer(CorsLayer::permissive());
+        .layer(cors);
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("Zenvra API listening on {}", listener.local_addr()?);
@@ -43,7 +49,9 @@ async fn health_check() -> &'static str {
 
 /// Run a scan and return the results immediately (REST version).
 /// In the future, this will be replaced by SSE for real-time updates.
-async fn run_scan(Json(payload): Json<ScanRequest>) -> Json<Vec<Finding>> {
+async fn run_scan(
+    Json(payload): Json<ScanRequest>,
+) -> Result<Json<Vec<Finding>>, (StatusCode, String)> {
     tracing::info!("Received scan request for language: {}", payload.language);
 
     let engines = payload
@@ -60,17 +68,20 @@ async fn run_scan(Json(payload): Json<ScanRequest>) -> Json<Vec<Finding>> {
 
     let config = ScanConfig {
         code: payload.code,
-        language: zenvra_scanner::Language::Unknown, // TODO: Map language string
+        language: Language::from_str(&payload.language),
         engines,
         ai_config: payload.ai_config,
         file_path: None,
     };
 
     match zenvra_scanner::scan(&config).await {
-        Ok(findings) => Json(findings),
+        Ok(findings) => Ok(Json(findings)),
         Err(e) => {
             tracing::error!("Scan failed: {}", e);
-            Json(vec![])
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Scan failed internally: {}", e),
+            ))
         }
     }
 }

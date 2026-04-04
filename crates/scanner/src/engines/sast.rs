@@ -8,6 +8,19 @@ use crate::finding::{RawFinding, Severity};
 use crate::ScanConfig;
 use anyhow::Result;
 use regex::Regex;
+use std::sync::OnceLock;
+
+static MD5_REGEX: OnceLock<Regex> = OnceLock::new();
+static SHA1_REGEX: OnceLock<Regex> = OnceLock::new();
+static SQLI_REGEX: OnceLock<Regex> = OnceLock::new();
+static CMD_INJECTION_REGEX: OnceLock<Regex> = OnceLock::new();
+static XSS_REGEX: OnceLock<Regex> = OnceLock::new();
+static LOCALHOST_REGEX: OnceLock<Regex> = OnceLock::new();
+static INSECURE_RANDOM_REGEX: OnceLock<Regex> = OnceLock::new();
+static PATH_TRAVERSAL_REGEX: OnceLock<Regex> = OnceLock::new();
+static PROTOTYPE_POLLUTION_REGEX: OnceLock<Regex> = OnceLock::new();
+static WEAK_CRYPTO_REGEX: OnceLock<Regex> = OnceLock::new();
+static EVAL_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// A pattern for detecting a specific security vulnerability.
 struct SastRule {
@@ -24,14 +37,14 @@ fn build_rules() -> Vec<SastRule> {
         // ── Insecure Cryptography ──────────────────────────────────────────
         SastRule {
             name: "Insecure Hashing Algorithm (MD5)",
-            regex: Regex::new(r#"(?i)\bmd5\b\(|hashlib\.md5\(|crypto\.createHash\(['"]md5['"]\)"#).expect("valid regex"),
+            regex: MD5_REGEX.get_or_init(|| Regex::new(r#"(?i)\bmd5\b\(|hashlib\.md5\(|crypto\.createHash\(['"]md5['"]\)"#).unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-327",
             description: "MD5 is a cryptographically broken hashing algorithm. Use SHA-256 or Argon2 instead.",
         },
         SastRule {
             name: "Insecure Hashing Algorithm (SHA1)",
-            regex: Regex::new(r#"(?i)\bsha1\b\(|hashlib\.sha1\(|crypto\.createHash\(['"]sha1['"]\)"#).expect("valid regex"),
+            regex: SHA1_REGEX.get_or_init(|| Regex::new(r#"(?i)\bsha1\b\(|hashlib\.sha1\(|crypto\.createHash\(['"]sha1['"]\)"#).unwrap()).clone(),
             severity: Severity::Low,
             cwe_id: "CWE-327",
             description: "SHA-1 is no longer considered secure against well-funded attackers. Use SHA-256 or better.",
@@ -39,30 +52,68 @@ fn build_rules() -> Vec<SastRule> {
         // ── Injection Vulnerabilities ──────────────────────────────────────
         SastRule {
             name: "Potential SQL Injection (String Concatenation)",
-            regex: Regex::new(r#"(?i)(SELECT|INSERT|UPDATE|DELETE|FROM).*(\+|=.*f['"]|\.format\(|\$\{).*"#).expect("valid regex"),
+            regex: SQLI_REGEX.get_or_init(|| Regex::new(r#"(?i)(SELECT|INSERT|UPDATE|DELETE|FROM).*(f?['"]|\+|=.*|\.format\(|\$\{).*"#).unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-89",
             description: "Detected string concatenation in a SQL query. Use parameterized queries or an ORM to prevent SQL injection.",
         },
         SastRule {
             name: "Potential OS Command Injection",
-            regex: Regex::new(r"(?i)\bos\.(system|popen)\(|subprocess\.(run|call|Popen)\(.*\bshell\s*=\s*True\b|child_process\.exec\(").expect("valid regex"),
+            regex: CMD_INJECTION_REGEX.get_or_init(|| Regex::new(r"(?i)\bos\.(system|popen)\(|subprocess\.(run|call|Popen)\(.*\bshell\s*=\s*True\b|child_process\.exec\(").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-78",
             description: "Executing OS commands with unsanitized input or via a shell can lead to command injection.",
         },
+        SastRule {
+            name: "Dangerous Use of eval()",
+            regex: EVAL_REGEX.get_or_init(|| Regex::new(r#"(?i)\beval\(|new Function\(|setTimeout\(.*['"].*['"]\)"#).unwrap()).clone(),
+            severity: Severity::High,
+            cwe_id: "CWE-95",
+            description: "eval() and its variants execute arbitrary strings as code, leading to remote code execution (RCE).",
+        },
         // ── Cross-Site Scripting (XSS) ──────────────────────────────────────
         SastRule {
-            name: "Insecure HTML Rendering (innerHTML)",
-            regex: Regex::new(r"(?i)\.innerHTML\s*=|dangerousSetInnerHTML|\$state\.raw\(.*<").expect("valid regex"),
+            name: "Insecure HTML Rendering (XSS Sink)",
+            regex: XSS_REGEX.get_or_init(|| Regex::new(r"(?i)\.innerHTML\s*=|dangerousSetInnerHTML|\{@html\b").unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-79",
-            description: "Directly setting innerHTML or using dangerouslySetInnerHTML bypasses sanitization and can lead to XSS.",
+            description: "Directly setting innerHTML, using dangerouslySetInnerHTML, or {@html} in Svelte bypasses sanitization and can lead to XSS.",
+        },
+        // ── File System & Path Vulnerabilities ─────────────────────────────
+        SastRule {
+            name: "Potential Path Traversal",
+            regex: PATH_TRAVERSAL_REGEX.get_or_init(|| Regex::new(r#"(?i)fs\.(readFile|writeFile|open)\(.*\+.*|req\.(query|body)\..*\.\./"#).unwrap()).clone(),
+            severity: Severity::High,
+            cwe_id: "CWE-22",
+            description: "Using unsanitized user input in file paths can allow attackers to read or write arbitrary files on the system.",
+        },
+        // ── Language-Specific Vulnerabilities ──────────────────────────────
+        SastRule {
+            name: "Prototype Pollution Potential",
+            regex: PROTOTYPE_POLLUTION_REGEX.get_or_init(|| Regex::new(r"(?i)Object\.assign\(.*\.\.\.|JSON\.parse\(.*req\.(body|query)").unwrap()).clone(),
+            severity: Severity::Medium,
+            cwe_id: "CWE-1321",
+            description: "Unsafe merging of user-controlled objects can lead to prototype pollution in JavaScript/Node.js.",
+        },
+        // ── Insecure Randomness ───────────────────────────────────────────
+        SastRule {
+            name: "Insecure Random Number Generation",
+            regex: INSECURE_RANDOM_REGEX.get_or_init(|| Regex::new(r"(?i)Math\.random\(|rand\.(Int|Float|random)").unwrap()).clone(),
+            severity: Severity::Low,
+            cwe_id: "CWE-338",
+            description: "Non-cryptographically secure random number generators should not be used for security-sensitive operations.",
+        },
+        SastRule {
+            name: "Weak Hashing Algorithm (Legacy)",
+            regex: WEAK_CRYPTO_REGEX.get_or_init(|| Regex::new(r#"(?i)\b(des|rc4|blowfish)\b"#).unwrap()).clone(),
+            severity: Severity::Medium,
+            cwe_id: "CWE-327",
+            description: "Legacy encryption algorithms like DES and RC4 are no longer considered secure for modern applications.",
         },
         // ── Insecure Defaults ──────────────────────────────────────────────
         SastRule {
             name: "Hardcoded Localhost Reference",
-            regex: Regex::new(r"127\.0\.0\.1|localhost").expect("valid regex"),
+            regex: LOCALHOST_REGEX.get_or_init(|| Regex::new(r"127\.0\.0\.1|localhost").unwrap()).clone(),
             severity: Severity::Info,
             cwe_id: "CWE-1188",
             description: "Hardcoded localhost references can cause issues when deploying to production.",

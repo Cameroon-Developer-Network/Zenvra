@@ -41,7 +41,10 @@
       <div class="glass-card p-6 flex flex-col justify-between hover:translate-y-[-4px]">
         <div class="flex items-center justify-between mb-4">
           <span class="text-sm font-semibold text-zinc-500 uppercase tracking-wider">{stat.label}</span>
-          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full {stat.trend.startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 'bg-red-500/10 text-red-500'}">
+          <span class="text-[10px] font-bold px-2 py-0.5 rounded-full 
+            {stat.trend.startsWith('+') ? 'bg-emerald-500/10 text-emerald-500' : 
+             stat.trend.startsWith('-') ? 'bg-red-500/10 text-red-500' : 
+             'bg-zinc-800 text-zinc-500'}">
             {stat.trend}
           </span>
         </div>

@@ -1,27 +1,19 @@
 <script lang="ts">
+  import { scan, type Finding } from "$lib/api";
 
   let code = $state(`// Paste your code here to scan for vulnerabilities
-def insecure_database_query(user_id):
+def get_user(user_id):
     # Potential SQL Injection
     query = "SELECT * FROM users WHERE id = " + user_id
-    cursor.execute(query)
+    db.execute(query)
     
     # Potential hardcoded secret
-    stripe_key = "SK_LIVE_REDACTED_FOR_TESTING"
+    api_key = "abc123_redacted_for_demonstration"
     
-    return cursor.fetchone()`);
+    return db.fetchone()`);
 
-  interface Finding {
-    id: string;
-    severity: string;
-    cwe_id?: string;
-    title: string;
-    line_start: number;
-    description?: string;
-    explanation?: string;
-    vulnerable_code: string;
-    fixed_code?: string;
-  }
+  let apiKey = $state("");
+
 
   let isScanning = $state(false);
   let findings = $state<Finding[]>([]);
@@ -33,24 +25,18 @@ def insecure_database_query(user_id):
     findings = [];
     
     try {
-      const response = await fetch("http://localhost:8080/api/v1/scan", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          code,
-          language: "python",
-          engines: ["sast", "secrets"],
-          ai_config: {
-            provider,
-            api_key: "dummy-key", // In production this would come from secure storage or user session
-            model,
-          }
-        })
+      const results = await scan({
+        code,
+        language: "python",
+        engines: ["sast", "secrets"],
+        ai_config: apiKey ? {
+          provider,
+          api_key: apiKey,
+          model,
+        } : undefined
       });
       
-      if (response.ok) {
-        findings = await response.json();
-      }
+      findings = results;
     } catch (error) {
       console.error("Scan failed", error);
     } finally {
@@ -59,11 +45,11 @@ def insecure_database_query(user_id):
   };
 
   const getSeverityColor = (sev: string) => {
-    switch(sev) {
-      case "Critical": return "bg-red-500 text-white";
-      case "High": return "bg-orange-500 text-white";
-      case "Medium": return "bg-yellow-500 text-black";
-      case "Low": return "bg-blue-500 text-white";
+    switch(sev.toLowerCase()) {
+      case "critical": return "bg-red-500 text-white";
+      case "high": return "bg-orange-500 text-white";
+      case "medium": return "bg-yellow-500 text-black";
+      case "low": return "bg-blue-500 text-white";
       default: return "bg-zinc-500 text-white";
     }
   };
@@ -87,8 +73,15 @@ def insecure_database_query(user_id):
         <div class="w-px h-4 bg-border mx-1"></div>
         <input 
           bind:value={model} 
-          class="bg-transparent text-sm text-zinc-400 px-3 py-1 outline-none min-w-[200px]" 
+          class="bg-transparent text-sm text-zinc-400 px-3 py-1 outline-none min-w-[150px]" 
           placeholder="Model name..."
+        />
+        <div class="w-px h-4 bg-border mx-1"></div>
+        <input 
+          type="password"
+          bind:value={apiKey} 
+          class="bg-transparent text-sm text-zinc-100 px-3 py-1 outline-none min-w-[200px]" 
+          placeholder="API Key (optional)..."
         />
       </div>
       <button 

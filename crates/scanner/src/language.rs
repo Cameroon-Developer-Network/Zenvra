@@ -41,4 +41,24 @@ impl Language {
             _ => Self::Unknown,
         }
     }
+
+    /// Detect language from a string (e.g. from an API request).
+    pub fn from_str(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "python" | "py" => Self::Python,
+            "javascript" | "js" => Self::JavaScript,
+            "typescript" | "ts" => Self::TypeScript,
+            "rust" | "rs" => Self::Rust,
+            "go" | "golang" => Self::Go,
+            "java" => Self::Java,
+            "csharp" | "cs" => Self::CSharp,
+            "cpp" | "c++" => Self::Cpp,
+            "c" => Self::C,
+            "ruby" | "rb" => Self::Ruby,
+            "php" => Self::Php,
+            "swift" => Self::Swift,
+            "kotlin" | "kt" => Self::Kotlin,
+            _ => Self::Unknown,
+        }
+    }
 }

@@ -9,6 +9,25 @@ use crate::finding::{RawFinding, Severity};
 use crate::ScanConfig;
 use anyhow::Result;
 use regex::Regex;
+use std::sync::OnceLock;
+
+static AWS_ID_REGEX: OnceLock<Regex> = OnceLock::new();
+static AWS_SECRET_REGEX: OnceLock<Regex> = OnceLock::new();
+static PRIVATE_KEY_REGEX: OnceLock<Regex> = OnceLock::new();
+static GITHUB_PAT_REGEX: OnceLock<Regex> = OnceLock::new();
+static GITHUB_OAUTH_REGEX: OnceLock<Regex> = OnceLock::new();
+static ANTHROPIC_KEY_REGEX: OnceLock<Regex> = OnceLock::new();
+static OPENAI_KEY_REGEX: OnceLock<Regex> = OnceLock::new();
+static STRIPE_SECRET_REGEX: OnceLock<Regex> = OnceLock::new();
+static STRIPE_WEBHOOK_REGEX: OnceLock<Regex> = OnceLock::new();
+static SLACK_WEBHOOK_REGEX: OnceLock<Regex> = OnceLock::new();
+static SLACK_BOT_REGEX: OnceLock<Regex> = OnceLock::new();
+static GOOGLE_API_REGEX: OnceLock<Regex> = OnceLock::new();
+static TWILIO_API_REGEX: OnceLock<Regex> = OnceLock::new();
+static DB_CONN_REGEX: OnceLock<Regex> = OnceLock::new();
+static JWT_REGEX: OnceLock<Regex> = OnceLock::new();
+static GENERIC_API_REGEX: OnceLock<Regex> = OnceLock::new();
+static GENERIC_PWD_REGEX: OnceLock<Regex> = OnceLock::new();
 
 /// A pattern for detecting a specific type of secret.
 struct SecretPattern {
@@ -26,119 +45,113 @@ struct SecretPattern {
 ///
 /// Each pattern is a regex that matches a specific type of secret.
 /// Patterns are ordered by severity (critical first) for consistency.
+/// Build the list of secret detection patterns.
 fn build_patterns() -> Vec<SecretPattern> {
     vec![
         // ── Critical: cloud provider keys ──────────────────────────────────
         SecretPattern {
             name: "AWS Access Key ID",
-            regex: Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").expect("valid regex"),
+            regex: AWS_ID_REGEX.get_or_init(|| Regex::new(r"(?i)(AKIA[0-9A-Z]{16})").unwrap()).clone(),
             severity: Severity::Critical,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "AWS Secret Access Key",
-            regex: Regex::new(r#"(?i)aws_secret_access_key\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?"#)
-                .expect("valid regex"),
+            regex: AWS_SECRET_REGEX.get_or_init(|| Regex::new(r#"(?i)aws_secret_access_key\s*[=:]\s*['"]?([A-Za-z0-9/+=]{40})['"]?"#).unwrap()).clone(),
             severity: Severity::Critical,
             cwe_id: "CWE-798",
         },
         // ── Critical: private keys ─────────────────────────────────────────
         SecretPattern {
             name: "Private Key",
-            regex: Regex::new(r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----").expect("valid regex"),
+            regex: PRIVATE_KEY_REGEX.get_or_init(|| Regex::new(r"-----BEGIN (RSA |EC |DSA |OPENSSH )?PRIVATE KEY-----").unwrap()).clone(),
             severity: Severity::Critical,
             cwe_id: "CWE-321",
         },
         // ── High: API keys and tokens ──────────────────────────────────────
         SecretPattern {
             name: "GitHub Personal Access Token",
-            regex: Regex::new(r"(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})")
-                .expect("valid regex"),
+            regex: GITHUB_PAT_REGEX.get_or_init(|| Regex::new(r"(ghp_[a-zA-Z0-9]{36}|github_pat_[a-zA-Z0-9]{22}_[a-zA-Z0-9]{59})").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "GitHub OAuth Access Token",
-            regex: Regex::new(r"gho_[a-zA-Z0-9]{36}").expect("valid regex"),
+            regex: GITHUB_OAUTH_REGEX.get_or_init(|| Regex::new(r"gho_[a-zA-Z0-9]{36}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Anthropic API Key",
-            regex: Regex::new(r"sk-ant-[a-zA-Z0-9_-]{40,}").expect("valid regex"),
+            regex: ANTHROPIC_KEY_REGEX.get_or_init(|| Regex::new(r"sk-ant-[a-zA-Z0-9_-]{40,}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "OpenAI API Key",
-            regex: Regex::new(r"sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}").expect("valid regex"),
+            regex: OPENAI_KEY_REGEX.get_or_init(|| Regex::new(r"sk-[a-zA-Z0-9]{20}T3BlbkFJ[a-zA-Z0-9]{20}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Stripe Secret Key",
-            regex: Regex::new(r"(?i)(sk_live_[a-zA-Z0-9]{24,}|sk_test_[a-zA-Z0-9]{24,})").expect("valid regex"),
+            regex: STRIPE_SECRET_REGEX.get_or_init(|| Regex::new(r"(?i)(sk_live_[a-zA-Z0-9]{24,}|sk_test_[a-zA-Z0-9]{24,})").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Stripe Webhook Secret",
-            regex: Regex::new(r"whsec_[a-zA-Z0-9]{24,}").expect("valid regex"),
+            regex: STRIPE_WEBHOOK_REGEX.get_or_init(|| Regex::new(r"whsec_[a-zA-Z0-9]{24,}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Slack Webhook URL",
-            regex: Regex::new(r"https://hooks\.slack\.com/services/T[a-zA-Z0-9]{8,}/B[a-zA-Z0-9]{8,}/[a-zA-Z0-9]{24}")
-                .expect("valid regex"),
+            regex: SLACK_WEBHOOK_REGEX.get_or_init(|| Regex::new(r"https://hooks\.slack\.com/services/T[a-zA-Z0-9]{8,}/B[a-zA-Z0-9]{8,}/[a-zA-Z0-9]{24}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Slack Bot Token",
-            regex: Regex::new(r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}").expect("valid regex"),
+            regex: SLACK_BOT_REGEX.get_or_init(|| Regex::new(r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[a-zA-Z0-9]{24}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Google API Key",
-            regex: Regex::new(r"AIza[0-9A-Za-z_-]{35}").expect("valid regex"),
+            regex: GOOGLE_API_REGEX.get_or_init(|| Regex::new(r"AIza[0-9A-Za-z_-]{35}").unwrap()).clone(),
             severity: Severity::High,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Twilio API Key",
-            regex: Regex::new(r"SK[a-f0-9]{32}").expect("valid regex"),
+            regex: TWILIO_API_REGEX.get_or_init(|| Regex::new(r"SK[a-f0-9]{32}").unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-798",
         },
         // ── Medium: database and connection strings ────────────────────────
         SecretPattern {
             name: "Database Connection String",
-            regex: Regex::new(r#"(?i)(postgres|mysql|mongodb(\+srv)?|redis)://[^\s'"]+:[^\s'"]+@[^\s'"]+"#)
-                .expect("valid regex"),
+            regex: DB_CONN_REGEX.get_or_init(|| Regex::new(r#"(?i)(postgres|mysql|mongodb(\+srv)?|redis)://[^\s'"]+:[^\s'"]+@[^\s'"]+"#).unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "JWT Token",
-            regex: Regex::new(r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}")
-                .expect("valid regex"),
+            regex: JWT_REGEX.get_or_init(|| Regex::new(r"eyJ[a-zA-Z0-9_-]{10,}\.eyJ[a-zA-Z0-9_-]{10,}\.[a-zA-Z0-9_-]{10,}").unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-798",
         },
         // ── Medium: generic patterns ───────────────────────────────────────
         SecretPattern {
             name: "Generic API Key Assignment",
-            regex: Regex::new(r#"(?i)(api_key|apikey|api_secret|secret_key|access_token)\s*[=:]\s*['"][a-zA-Z0-9_\-/.]{16,}['"]"#)
-                .expect("valid regex"),
+            regex: GENERIC_API_REGEX.get_or_init(|| Regex::new(r#"(?i)(api_key|apikey|api_secret|secret_key|access_token)\s*[=:]\s*['"][a-zA-Z0-9_\-/.]{16,}['"]"#).unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-798",
         },
         SecretPattern {
             name: "Generic Password Assignment",
-            regex: Regex::new(r#"(?i)(password|passwd|pwd)\s*[=:]\s*['"][^'"]{8,}['"]"#)
-                .expect("valid regex"),
+            regex: GENERIC_PWD_REGEX.get_or_init(|| Regex::new(r#"(?i)(password|passwd|pwd)\s*[=:]\s*['"][^'"]{8,}['"]"#).unwrap()).clone(),
             severity: Severity::Medium,
             cwe_id: "CWE-798",
         },
@@ -178,6 +191,7 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
 
                 // Redact all but first 4 and last 4 characters.
                 let redacted = redact_secret(matched);
+                let redacted_line = line.replace(matched, &redacted);
 
                 findings.push(RawFinding {
                     engine: Engine::Secrets,
@@ -185,7 +199,7 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
                     cwe_id: Some(pattern.cwe_id.to_string()),
                     severity: pattern.severity.clone(),
                     title: format!("Hardcoded {} detected", pattern.name),
-                    vulnerable_code: line.to_string(),
+                    vulnerable_code: redacted_line,
                     description: None,
                     line_start: line_number,
                     line_end: line_number,

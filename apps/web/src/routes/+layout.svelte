@@ -4,11 +4,11 @@
   let { children } = $props();
 
   const navItems = [
-    { name: "Dashboard", href: "/", icon: "layout-grid" },
-    { name: "Scan Code", href: "/scan", icon: "search" },
-    { name: "Scan History", href: "/history", icon: "clock" },
-    { name: "CVE Settings", href: "/settings/cve", icon: "database" },
-    { name: "AI Settings", href: "/settings/ai", icon: "sparkles" },
+    { name: "Dashboard", href: "/", icon: "layout-grid", disabled: false },
+    { name: "Scan Code", href: "/scan", icon: "search", disabled: false },
+    { name: "Scan History", href: "/history", icon: "clock", disabled: true },
+    { name: "CVE Settings", href: "/settings/cve", icon: "database", disabled: true },
+    { name: "AI Settings", href: "/settings/ai", icon: "sparkles", disabled: true },
   ];
 </script>
 
@@ -34,11 +34,19 @@
     <nav class="flex-1 px-4 py-4 space-y-1">
       {#each navItems as item (item.name)}
         <a 
-          href={item.href} 
-          class="flex items-center gap-3 px-4 py-2.5 rounded-xl transition-all duration-200 group {page.url.pathname === item.href ? 'bg-brand-primary/10 text-brand-primary' : 'hover:bg-white/5 text-zinc-400 hover:text-zinc-100'}"
+          href={item.disabled ? "javascript:void(0)" : item.href} 
+          class="flex items-center justify-between px-4 py-2.5 rounded-xl transition-all duration-200 group 
+            {item.disabled ? 'opacity-40 cursor-not-allowed grayscale' : 
+             page.url.pathname === item.href ? 'bg-brand-primary/10 text-brand-primary' : 
+             'hover:bg-white/5 text-zinc-400 hover:text-zinc-100'}"
         >
-          <span class="w-1.5 h-1.5 rounded-full bg-brand-primary transition-all duration-300 {page.url.pathname === item.href ? 'scale-100 opacity-100' : 'scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-50'}"></span>
-          <span class="font-medium">{item.name}</span>
+          <div class="flex items-center gap-3">
+            <span class="w-1.5 h-1.5 rounded-full bg-brand-primary transition-all duration-300 {page.url.pathname === item.href && !item.disabled ? 'scale-100 opacity-100' : 'scale-0 opacity-0 group-hover:scale-100 group-hover:opacity-50'}"></span>
+            <span class="font-medium">{item.name}</span>
+          </div>
+          {#if item.disabled}
+            <span class="text-[8px] font-bold bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded uppercase tracking-tighter">Soon</span>
+          {/if}
         </a>
       {/each}
     </nav>

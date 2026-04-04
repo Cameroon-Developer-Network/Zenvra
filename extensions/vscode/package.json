@@ -51,6 +51,11 @@
           "default": "",
           "description": "Your Zenvra API token from zenvra.dev/settings"
         },
+        "zenvra.apiUrl": {
+          "type": "string",
+          "default": "http://localhost:8080",
+          "description": "The URL of your Zenvra API server"
+        },
         "zenvra.minSeverity": {
           "type": "string",
           "default": "medium",

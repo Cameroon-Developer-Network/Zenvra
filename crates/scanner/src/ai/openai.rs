@@ -73,10 +73,16 @@ struct ModelData {
 /// List available models from an OpenAI-compatible API.
 pub async fn list_models(api_key: &str, endpoint: Option<&str>) -> Result<Vec<String>> {
     let client = reqwest::Client::new();
-    let ep = endpoint.unwrap_or("https://api.openai.com");
+    let ep = endpoint.unwrap_or("https://api.openai.com").trim_end_matches('/');
+    
+    let url = if ep.ends_with("/v1") {
+        format!("{}/models", ep)
+    } else {
+        format!("{}/v1/models", ep)
+    };
     
     let response = client
-        .get(format!("{}/v1/models", ep))
+        .get(url)
         .header("Authorization", format!("Bearer {}", api_key))
         .send()
         .await
@@ -106,9 +112,16 @@ impl OpenAiProvider {
             max_tokens: 1024,
         };
 
+        let ep = self.endpoint.trim_end_matches('/');
+        let url = if ep.ends_with("/v1") {
+            format!("{}/chat/completions", ep)
+        } else {
+            format!("{}/v1/chat/completions", ep)
+        };
+
         let response = self
             .client
-            .post(format!("{}/v1/chat/completions", self.endpoint))
+            .post(url)
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("Content-Type", "application/json")
             .json(&body)

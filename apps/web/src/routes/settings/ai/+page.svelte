@@ -1,96 +1,175 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { fetchAiModels } from "$lib/api";
 
   let provider = $state("anthropic");
-  let model = $state("claude-sonnet-4-20250514");
+  let selectedModel = $state("");
   let apiKey = $state("");
   let endpoint = $state("");
+  let availableModels = $state<string[]>([]);
+  let isLoadingModels = $state(false);
+  let error = $state<string | null>(null);
 
   const providers = [
-    { id: "anthropic", name: "Anthropic", models: ["claude-sonnet-4-20250514", "claude-opus-20240229", "claude-haiku-20240307"], color: "bg-[#7c3aed]" },
-    { id: "openai", name: "OpenAI", models: ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo"], color: "bg-[#10a37f]" },
-    { id: "google", name: "Google Gemini", models: ["gemini-2.0-flash", "gemini-1.5-pro-latest"], color: "bg-[#4285f4]" },
-    { id: "custom", name: "Custom Provider", models: ["openai-compatible"], color: "bg-zinc-600" }
+    { id: "anthropic", name: "Anthropic", color: "bg-[#7c3aed]", icon: "A" },
+    { id: "openai", name: "OpenAI", color: "bg-[#10a37f]", icon: "O" },
+    { id: "google", name: "Google Gemini", color: "bg-[#4285f4]", icon: "G" },
+    { id: "custom", name: "Custom Provider", color: "bg-zinc-600", icon: "C" }
   ];
 
+  const fetchModels = async () => {
+    if (!apiKey) {
+      error = "Please provide an API key first.";
+      return;
+    }
+    
+    isLoadingModels = true;
+    error = null;
+    availableModels = [];
+
+    try {
+      availableModels = await fetchAiModels(provider, apiKey, endpoint);
+      if (availableModels.length > 0) {
+        selectedModel = availableModels[0];
+      }
+    } catch (err: any) {
+      error = err.message || "Failed to fetch models. Check your API key and connection.";
+    } finally {
+      isLoadingModels = false;
+    }
+  };
+
   const handleSave = () => {
-     // Local storage for now, full backend sync in the next phase
+     if (!selectedModel) {
+       error = "Please select a model after fetching.";
+       return;
+     }
+
      localStorage.setItem('zenvra_ai_provider', provider);
-     localStorage.setItem('zenvra_ai_model', model);
+     localStorage.setItem('zenvra_ai_model', selectedModel);
      localStorage.setItem('zenvra_ai_api_key', apiKey);
-     alert("Configuration saved locally. Default models will now use these settings.");
+     if (endpoint) localStorage.setItem('zenvra_ai_endpoint', endpoint);
+     
+     alert("Advanced Configuration saved. Zenvra will now use your authorized " + selectedModel + " model.");
   };
 
   onMount(() => {
     provider = localStorage.getItem('zenvra_ai_provider') || "anthropic";
-    model = localStorage.getItem('zenvra_ai_model') || "claude-sonnet-4-20250514";
+    selectedModel = localStorage.getItem('zenvra_ai_model') || "";
     apiKey = localStorage.getItem('zenvra_ai_api_key') || "";
+    endpoint = localStorage.getItem('zenvra_ai_endpoint') || "";
+    
+    if (selectedModel) {
+      availableModels = [selectedModel];
+    }
   });
 </script>
 
-<div class="max-w-4xl mx-auto space-y-8">
+<div class="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
   <div class="flex items-end justify-between">
     <div>
-      <h1 class="text-3xl font-bold font-outfit mb-2">AI Configuration</h1>
-      <p class="text-zinc-500">Configure the AI models responsible for vulnerability explanations and fix suggestions.</p>
+      <h1 class="text-3xl font-bold font-outfit mb-2 tracking-tight">AI Settings</h1>
+      <p class="text-zinc-500 text-sm">Configure the intelligence engine for vulnerability explanations and fix suggestions.</p>
     </div>
   </div>
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
-    <!-- Configuration Form -->
     <div class="lg:col-span-2 space-y-6">
-      <div class="glass p-8 rounded-3xl border-zinc-800 space-y-6">
+      <div class="glass p-8 rounded-3xl border-zinc-800 space-y-8 relative overflow-hidden">
+        <!-- Provider Selection -->
         <div class="space-y-4">
           <label class="block">
-            <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 block">AI Provider</span>
-            <div class="grid grid-cols-2 gap-3">
+            <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 block">1. Choose Intelligence Provider</span>
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {#each providers as p}
                 <button 
-                  onclick={() => { provider = p.id; model = p.models[0]; }}
-                  class="p-4 rounded-2xl border transition-all flex flex-col gap-2 items-start text-left {provider === p.id ? 'border-brand-primary bg-brand-primary/5' : 'border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700'}"
+                  onclick={() => { provider = p.id; availableModels = []; selectedModel = ""; error = null; }}
+                  class="p-4 rounded-2xl border transition-all flex flex-col gap-3 items-center text-center {provider === p.id ? 'border-brand-primary bg-brand-primary/5 ring-1 ring-brand-primary/20' : 'border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700'}"
                 >
-                  <div class="w-2 h-2 rounded-full {p.color}"></div>
-                  <span class="text-sm font-bold {provider === p.id ? 'text-white' : 'text-zinc-400'}">{p.name}</span>
+                  <div class="w-8 h-8 rounded-xl {p.color} flex items-center justify-center font-bold text-white shadow-lg">{p.icon}</div>
+                  <span class="text-xs font-bold tracking-tight {provider === p.id ? 'text-white' : 'text-zinc-400'}">{p.name}</span>
                 </button>
               {/each}
             </div>
           </label>
+        </div>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- Connection Details -->
+        <div class="space-y-6 pt-4 border-t border-zinc-800/50">
+          <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 block">2. Authentication & Endpoint</span>
+          
+          <div class="space-y-4">
             <label class="block">
-              <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 block">Preferred Model</span>
-              <select bind:value={model} class="w-full glass bg-zinc-900 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none">
-                {#each (providers.find(p => p.id === provider)?.models || []) as m}
-                  <option value={m}>{m}</option>
-                {/each}
-              </select>
-            </label>
-
-            <label class="block">
-              <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 block">API Key</span>
+              <span class="text-xs font-bold text-zinc-400 mb-2 block">API Key</span>
               <input 
                 type="password"
                 bind:value={apiKey} 
-                class="w-full glass bg-zinc-900 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none" 
-                placeholder="sk-ant-... or sk-..."
+                class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none transition-all" 
+                placeholder="Paste your {provider} secret key..."
               />
             </label>
-          </div>
 
-          {#if provider === 'custom'}
-             <label class="block slide-in-from-top-2 animate-in duration-300">
-              <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest mb-2 block">Base Endpoint</span>
-              <input 
-                bind:value={endpoint} 
-                class="w-full glass bg-zinc-900 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none" 
-                placeholder="https://api.groq.com/openai/v1"
-              />
-            </label>
-          {/if}
+            {#if provider === 'custom'}
+               <label class="block animate-in slide-in-from-top-2">
+                <span class="text-xs font-bold text-zinc-400 mb-2 block">Base Endpoint URL</span>
+                <input 
+                  bind:value={endpoint} 
+                  class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none" 
+                  placeholder="e.g., https://api.groq.com/openai/v1"
+                />
+              </label>
+            {/if}
+
+            <button 
+              onclick={fetchModels} 
+              disabled={isLoadingModels || !apiKey}
+              class="w-full py-4 rounded-xl border border-zinc-800 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+            >
+              {#if isLoadingModels}
+                <svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+                Verifying Connection...
+              {:else}
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 21v-5h-5"/></svg>
+                Fetch Available Models
+              {/if}
+            </button>
+          </div>
         </div>
 
+        <!-- Model Selection (Conditional) -->
+        {#if availableModels.length > 0}
+          <div class="space-y-4 pt-6 border-t border-zinc-800/50 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 block">3. Select Authorized Model</span>
+            <div class="grid grid-cols-1 gap-2">
+              {#each availableModels as m}
+                <button 
+                  onclick={() => selectedModel = m}
+                  class="w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between {selectedModel === m ? 'border-brand-primary bg-brand-primary/10' : 'border-zinc-800 bg-zinc-900/30 hover:border-zinc-700'}"
+                >
+                  <span class="text-xs font-bold {selectedModel === m ? 'text-white' : 'text-zinc-500'}">{m}</span>
+                  {#if selectedModel === m}
+                    <div class="w-1.5 h-1.5 rounded-full bg-brand-primary shadow-[0_0_8px_rgba(124,58,237,0.5)]"></div>
+                  {/if}
+                </button>
+              {/each}
+            </div>
+          </div>
+        {/if}
+
+        {#if error}
+          <div class="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-medium animate-in shake-2">
+            {error}
+          </div>
+        {/if}
+
         <div class="pt-4 flex justify-end">
-          <button onclick={handleSave} class="btn-primary px-8">Save Configuration</button>
+          <button 
+            onclick={handleSave} 
+            disabled={!selectedModel}
+            class="btn-primary px-12 py-4 disabled:opacity-30 disabled:cursor-not-allowed shadow-xl shadow-brand-primary/10"
+          >
+            Save Configuration
+          </button>
         </div>
       </div>
     </div>
@@ -103,7 +182,7 @@
           Bring Your Own Key
         </h4>
         <p class="text-xs text-zinc-500 leading-relaxed">
-          Zenvra is built to be provider-agnostic. We don't mark up AI costs—simply bring your own API key to get start-of-the-art security analysis at market rates.
+          Zenvra is provider-agnostic. Your keys are used ONLY to generate reports and are never stored on our servers. You get direct market rates with zero markups.
         </p>
       </div>
 
@@ -114,9 +193,11 @@
              <div class="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
              Zero Data Training
            </div>
-           <div class="flex items-center gap-2 text-xs font-medium text-zinc-500">
-             <div class="w-1 h-1 rounded-full bg-zinc-500"></div>
-             Streaming Enabled
+           <div class="flex items-center gap-2 text-xs font-medium text-zinc-400">
+             <div class="w-1.5 h-1.5 rounded-full bg-zinc-700 flex items-center justify-center">
+                <div class="w-0.5 h-0.5 rounded-full bg-zinc-500"></div>
+             </div>
+             Encrypted Local Storage
            </div>
            <div class="flex items-center gap-2 text-xs font-medium text-zinc-500">
              <div class="w-1 h-1 rounded-full bg-zinc-500"></div>

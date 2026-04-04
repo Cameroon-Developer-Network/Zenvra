@@ -64,6 +64,25 @@ enum Commands {
         /// Scan ID to retrieve
         id: Option<String>,
     },
+
+    /// Configure Zenvra CLI settings (API keys, providers, etc.)
+    Config {
+        #[command(subcommand)]
+        action: ConfigAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum ConfigAction {
+    /// Set a configuration value (e.g. ai_key, ai_provider)
+    Set {
+        /// Configuration key
+        key: String,
+        /// Configuration value
+        value: String,
+    },
+    /// Show current configuration
+    Show,
 }
 
 #[tokio::main]
@@ -101,7 +120,70 @@ async fn main() -> Result<()> {
         }
         Commands::Auth { token } => cmd_auth(token).await,
         Commands::Report { id } => cmd_report(id).await,
+        Commands::Config { action } => cmd_config(action).await,
     }
+}
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+struct ZenvraConfig {
+    ai_provider: Option<String>,
+    ai_api_key: Option<String>,
+    ai_model: Option<String>,
+    ai_endpoint: Option<String>,
+}
+
+impl ZenvraConfig {
+    fn load() -> Self {
+        let config_path = Self::get_path();
+        if let Ok(content) = std::fs::read_to_string(config_path) {
+            serde_json::from_str(&content).unwrap_or_default()
+        } else {
+            Self::default()
+        }
+    }
+
+    fn save(&self) -> Result<()> {
+        let config_path = Self::get_path();
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let content = serde_json::to_string_pretty(self)?;
+        std::fs::write(config_path, content)?;
+        Ok(())
+    }
+
+    fn get_path() -> std::path::PathBuf {
+        let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
+        std::path::PathBuf::from(home).join(".config/zenvra/config.json")
+    }
+}
+
+async fn cmd_config(action: ConfigAction) -> Result<()> {
+    let mut config = ZenvraConfig::load();
+    match action {
+        ConfigAction::Set { key, value } => {
+            match key.to_lowercase().as_str() {
+                "ai_provider" => config.ai_provider = Some(value.clone()),
+                "ai_key" | "ai_api_key" => config.ai_api_key = Some(value.clone()),
+                "ai_model" => config.ai_model = Some(value.clone()),
+                "ai_endpoint" => config.ai_endpoint = Some(value.clone()),
+                _ => anyhow::bail!("Unknown config key: {}. Valid: ai_provider, ai_key, ai_model, ai_endpoint", key),
+            }
+            config.save()?;
+            println!("✅ Config updated: {} set to {}", key, value);
+        }
+        ConfigAction::Show => {
+            use colored::Colorize;
+            println!("{}", "Zenvra CLI Configuration:".bold());
+            println!("   Path: {}", ZenvraConfig::get_path().display().to_string().dimmed());
+            println!();
+            let json = serde_json::to_string_pretty(&config)?;
+            println!("{}", json);
+        }
+    }
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -226,9 +308,15 @@ fn build_ai_config(
 ) -> Result<Option<zenvra_scanner::ai::AiConfig>> {
     use zenvra_scanner::ai::{AiConfig, ProviderKind};
 
-    // Try CLI flags first, then env vars.
-    let provider_str = provider.or_else(|| std::env::var("AI_PROVIDER").ok());
-    let api_key = key.or_else(|| std::env::var("AI_API_KEY").ok());
+    let local_config = ZenvraConfig::load();
+
+    // Priority: CLI Flag > Local Config > Env Var
+    let provider_str = provider
+        .or_else(|| local_config.ai_provider.clone())
+        .or_else(|| std::env::var("AI_PROVIDER").ok());
+    let api_key = key
+        .or_else(|| local_config.ai_api_key.clone())
+        .or_else(|| std::env::var("AI_API_KEY").ok());
 
     let Some(provider_str) = provider_str else {
         return Ok(None);
@@ -248,15 +336,18 @@ fn build_ai_config(
     };
 
     let model_name = model
+        .or_else(|| local_config.ai_model.clone())
         .or_else(|| std::env::var("AI_MODEL").ok())
         .unwrap_or_else(|| match provider_kind {
-            ProviderKind::Anthropic => "claude-sonnet-4-20250514".to_string(),
+            ProviderKind::Anthropic => "claude-3-5-sonnet-20240620".to_string(),
             ProviderKind::OpenAi => "gpt-4o".to_string(),
             ProviderKind::Google => "gemini-2.0-flash".to_string(),
             ProviderKind::Custom => "default".to_string(),
         });
 
-    let endpoint_url = endpoint.or_else(|| std::env::var("AI_ENDPOINT").ok());
+    let endpoint_url = endpoint
+        .or_else(|| local_config.ai_endpoint.clone())
+        .or_else(|| std::env::var("AI_ENDPOINT").ok());
 
     Ok(Some(AiConfig {
         provider: provider_kind,

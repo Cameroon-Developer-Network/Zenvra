@@ -74,3 +74,23 @@ export async function triggerSync(): Promise<{ status: string; message: string }
   if (!res.ok) throw new Error('Synchronization failed');
   return res.json();
 }
+
+/**
+ * Fetch available models for a given AI provider.
+ */
+export async function fetchAiModels(provider: string, apiKey: string, endpoint?: string): Promise<string[]> {
+  const res = await fetch(`${BASE_URL}/api/v1/ai/models`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ 
+      provider, 
+      api_key: apiKey, 
+      endpoint: endpoint || null 
+    })
+  });
+  if (!res.ok) {
+    const errorText = await res.text();
+    throw new Error(errorText || "Failed to fetch models");
+  }
+  return res.json();
+}

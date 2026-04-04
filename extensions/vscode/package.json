@@ -76,6 +76,32 @@
             "ai_code"
           ],
           "description": "Which scan engines to run"
+        },
+        "zenvra.aiProvider": {
+          "type": "string",
+          "default": "anthropic",
+          "enum": [
+            "anthropic",
+            "openai",
+            "google",
+            "custom"
+          ],
+          "description": "Primary AI provider for vulnerability explanations and fix suggestions"
+        },
+        "zenvra.aiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Your API key for the chosen AI provider (if not set in environment or CLI config)"
+        },
+        "zenvra.aiModel": {
+          "type": "string",
+          "default": "claude-3-5-sonnet-20240620",
+          "description": "Specific model identifier (e.g. gpt-4o, claude-3-opus, gemini-1.5-pro)"
+        },
+        "zenvra.aiEndpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom endpoint URL (required for 'custom' provider)"
         }
       }
     }

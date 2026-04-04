@@ -120,6 +120,25 @@ pub fn create_provider(config: &AiConfig) -> Result<Box<dyn AiProvider>> {
     }
 }
 
+/// List available models for a given provider and API key.
+///
+/// This provides the "sophisticated" dynamic loading requested by the user.
+pub async fn list_models(
+    provider: ProviderKind,
+    api_key: &str,
+    endpoint: Option<&str>,
+) -> Result<Vec<String>> {
+    match provider {
+        ProviderKind::Anthropic => anthropic::list_models(api_key, endpoint).await,
+        ProviderKind::OpenAi => openai::list_models(api_key, endpoint).await,
+        ProviderKind::Google => google::list_models(api_key, endpoint).await,
+        ProviderKind::Custom => {
+            let ep = endpoint.ok_or_else(|| anyhow::anyhow!("Custom provider requires an endpoint"))?;
+            openai::list_models(api_key, Some(ep)).await
+        }
+    }
+}
+
 /// Build the system prompt used across all AI providers.
 pub(crate) fn build_explain_prompt(finding: &RawFinding) -> String {
     format!(

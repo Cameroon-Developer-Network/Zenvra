@@ -93,6 +93,7 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
         .route("/api/v1/scan", post(run_scan))
         .route("/api/v1/history", get(get_history))
         .route("/api/v1/sync", post(trigger_sync))
+        .route("/api/v1/ai/models", post(fetch_ai_models))
         .with_state(state)
         .layer(cors);
 
@@ -262,5 +263,41 @@ async fn trigger_sync(
     match cve_sync::sync_all(&state.db).await {
         Ok(_) => Ok(Json(serde_json::json!({"status": "success", "message": "Synchronization completed"}))),
         Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Sync failed: {}", e))),
+    }
+}
+
+#[derive(Deserialize)]
+struct ModelsRequest {
+    provider: String,
+    api_key: String,
+    endpoint: Option<String>,
+}
+
+async fn fetch_ai_models(
+    State(_state): State<Arc<AppState>>,
+    Json(payload): Json<ModelsRequest>,
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    tracing::info!("Attempting to fetch AI models for provider: {}", payload.provider);
+    
+    let provider = match payload.provider.as_str() {
+        "anthropic" => zenvra_scanner::ai::ProviderKind::Anthropic,
+        "openai" => zenvra_scanner::ai::ProviderKind::OpenAi,
+        "google" => zenvra_scanner::ai::ProviderKind::Google,
+        "custom" => zenvra_scanner::ai::ProviderKind::Custom,
+        _ => {
+            tracing::warn!("Invalid AI provider requested: {}", payload.provider);
+            return Err((StatusCode::BAD_REQUEST, "Invalid provider".to_string()));
+        }
+    };
+
+    match zenvra_scanner::ai::list_models(provider, &payload.api_key, payload.endpoint.as_deref()).await {
+        Ok(models) => {
+            tracing::info!("Successfully fetched {} models for {}", models.len(), payload.provider);
+            Ok(Json(models))
+        },
+        Err(e) => {
+            tracing::error!("Failed to fetch models for {}: {}", payload.provider, e);
+            Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
+        },
     }
 }

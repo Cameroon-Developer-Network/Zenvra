@@ -51,6 +51,52 @@ struct ContentBlock {
     text: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ListModelsResponse {
+    data: Vec<ModelInfo>,
+}
+
+#[derive(Deserialize)]
+struct ModelInfo {
+    id: String,
+}
+
+/// List available models from the Anthropic API.
+pub async fn list_models(api_key: &str, endpoint: Option<&str>) -> Result<Vec<String>> {
+    let client = reqwest::Client::new();
+    let ep = endpoint.unwrap_or("https://api.anthropic.com");
+
+    let response = client
+        .get(format!("{}/v1/models", ep))
+        .header("x-api-key", api_key)
+        .header("anthropic-version", "2023-06-01")
+        .send()
+        .await
+        .context("Failed to connect to Anthropic model list")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        // Fallback to static list if endpoint is 404/403 or server errors
+        if status.is_client_error() || status.is_server_error() {
+            return Ok(vec![
+                "claude-3-5-sonnet-20240620".to_string(),
+                "claude-3-opus-20240229".to_string(),
+                "claude-3-sonnet-20240229".to_string(),
+                "claude-3-haiku-20240307".to_string(),
+            ]);
+        }
+        anyhow::bail!("Anthropic API returned {status}");
+    }
+
+    let resp: ListModelsResponse = response
+        .json()
+        .await
+        .context("Failed to parse model list")?;
+    let mut models: Vec<String> = resp.data.into_iter().map(|m| m.id).collect();
+    models.sort();
+    Ok(models)
+}
+
 impl AnthropicProvider {
     /// Call the Anthropic Messages API.
     async fn call(&self, prompt: &str) -> Result<String> {

@@ -71,6 +71,50 @@ struct CandidatePart {
     text: Option<String>,
 }
 
+#[derive(Deserialize)]
+struct ListModelsResponse {
+    models: Vec<ModelInfo>,
+}
+
+#[derive(Deserialize)]
+struct ModelInfo {
+    name: String,
+}
+
+/// List available models from the Google Gemini API.
+pub async fn list_models(api_key: &str, endpoint: Option<&str>) -> Result<Vec<String>> {
+    let client = reqwest::Client::new();
+    let ep = endpoint.unwrap_or("https://generativelanguage.googleapis.com");
+
+    let url = format!("{}/v1beta/models?key={}", ep, api_key);
+
+    let response = client
+        .get(&url)
+        .send()
+        .await
+        .context("Failed to connect to Google Gemini model list")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
+        anyhow::bail!("Google Gemini API returned {status}: {body}");
+    }
+
+    let resp: ListModelsResponse = response
+        .json()
+        .await
+        .context("Failed to parse model list")?;
+
+    // Google returns names as "models/gemini-1.5-pro". Strip the prefix.
+    let mut models: Vec<String> = resp
+        .models
+        .into_iter()
+        .map(|m| m.name.replace("models/", ""))
+        .collect();
+    models.sort();
+    Ok(models)
+}
+
 impl GoogleProvider {
     /// Call the Gemini generateContent API.
     async fn call(&self, prompt: &str) -> Result<String> {

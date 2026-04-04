@@ -273,24 +273,23 @@ mod tests {
 
     #[tokio::test]
     async fn detects_database_url() {
-        let findings =
-            scan_code("DATABASE_URL=postgres://admin:pass123@localhost:5432/mydb").await;
+        let findings = scan_code("DATABASE_URL=postgres://admin:pass123@localhost:5432/mydb").await;
         assert_eq!(findings.len(), 1);
         assert!(findings[0].title.contains("Database Connection String"));
     }
 
     #[tokio::test]
     async fn clean_code_produces_no_findings() {
-        let findings = scan_code(
-            "fn main() {\n    println!(\"Hello, world!\");\n}",
-        )
-        .await;
+        let findings = scan_code("fn main() {\n    println!(\"Hello, world!\");\n}").await;
         assert!(findings.is_empty());
     }
 
     #[test]
     fn redact_works() {
-        assert_eq!(redact_secret("AKIAIOSFODNN7EXAMPLE"), "AKIA************…MPLE");
+        assert_eq!(
+            redact_secret("AKIAIOSFODNN7EXAMPLE"),
+            "AKIA************…MPLE"
+        );
         assert_eq!(redact_secret("short"), "*****");
     }
 }

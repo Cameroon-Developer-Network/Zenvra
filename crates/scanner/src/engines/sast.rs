@@ -124,7 +124,10 @@ mod tests {
 
     #[tokio::test]
     async fn detects_sqli() {
-        let findings = scan_code("cursor.execute(\"SELECT * FROM users WHERE name = '\" + user_input + \"'\")").await;
+        let findings = scan_code(
+            "cursor.execute(\"SELECT * FROM users WHERE name = '\" + user_input + \"'\")",
+        )
+        .await;
         assert_eq!(findings.len(), 1);
         assert!(findings[0].title.contains("SQL Injection"));
     }

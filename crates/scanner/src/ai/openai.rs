@@ -3,7 +3,7 @@
 //! Works with OpenAI, Groq, Together, and any OpenAI-compatible API.
 //! Users can override the endpoint to point at alternative providers.
 
-use super::{AiProvider, build_explain_prompt, build_fix_prompt};
+use super::{build_explain_prompt, build_fix_prompt, AiProvider};
 use crate::finding::RawFinding;
 use anyhow::{Context, Result};
 use async_trait::async_trait;

@@ -3,7 +3,7 @@
 //! Assumes an OpenAI-compatible API format, which is the most common
 //! protocol for self-hosted models (Ollama, vLLM, LiteLLM, etc.).
 
-use super::{AiProvider, build_explain_prompt, build_fix_prompt};
+use super::{build_explain_prompt, build_fix_prompt, AiProvider};
 use crate::finding::RawFinding;
 use anyhow::{Context, Result};
 use async_trait::async_trait;

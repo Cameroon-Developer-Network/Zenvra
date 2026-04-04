@@ -27,6 +27,37 @@ services:
       timeout: 5s
       retries: 5
 
+  zenvra-api:
+    image: ghcr.io/cameroon-developer-network/zenvra-api:v0.1.1-rc.1
+    build:
+      context: .
+      dockerfile: crates/server/Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres@postgres:5432/zenvra
+      REDIS_URL: redis://redis:6379
+      RUST_LOG: info
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  zenvra-web:
+    image: ghcr.io/cameroon-developer-network/zenvra-web:v0.1.1-rc.1
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      PUBLIC_API_URL: http://localhost:8080
+      # Internal URL for server-side fetches
+      API_URL: http://zenvra-api:8080
+    depends_on:
+      - zenvra-api
+
 volumes:
   postgres_data:
   redis_data:

@@ -43,6 +43,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this._view = panel;
   }
 
+  public postMessage(message: any) {
+    if (this._view) {
+      this._view.webview.postMessage(message);
+    }
+  }
+
   private _getHtmlForWebview(webview: vscode.Webview) {
     return `<!DOCTYPE html>
 			<html lang="en">
@@ -52,115 +58,160 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 				<title>Zenvra</title>
                 <style>
                     body { 
-                        padding: 20px; 
+                        padding: 15px; 
                         color: var(--vscode-foreground);
                         font-family: var(--vscode-font-family);
+                        overflow-x: hidden;
                     }
                     .container {
                         display: flex;
                         flex-direction: column;
-                        gap: 15px;
-                        align-items: center;
-                        text-align: center;
+                        gap: 12px;
                     }
-                    .logo-container {
-                        width: 64px;
-                        height: 64px;
-                        margin-bottom: 10px;
-                        filter: drop-shadow(0 0 8px rgba(124, 58, 237, 0.3));
+                    .header {
+                        display: flex;
+                        align-items: center;
+                        gap: 10px;
+                        margin-bottom: 5px;
+                    }
+                    .logo {
+                        width: 24px;
+                        height: 24px;
+                        color: #7c3aed;
                     }
                     .title {
-                        font-size: 18px;
+                        font-size: 14px;
                         font-weight: bold;
                         margin: 0;
-                        color: var(--vscode-editor-foreground);
-                    }
-                    .subtitle {
-                        font-size: 11px;
-                        opacity: 0.7;
-                        letter-spacing: 0.1em;
-                        text-transform: uppercase;
-                        margin-top: -5px;
                     }
                     .btn { 
                         background: #7c3aed; 
                         color: white; 
                         border: none; 
-                        padding: 10px 20px; 
-                        border-radius: 8px; 
+                        padding: 8px 16px; 
+                        border-radius: 6px; 
                         cursor: pointer; 
                         width: 100%;
                         font-weight: bold;
-                        font-size: 12px;
+                        font-size: 11px;
                         transition: all 0.2s;
-                        box-shadow: 0 4px 12px rgba(124, 58, 237, 0.2);
                     }
-                    .btn:hover { 
-                        background: #6d28d9; 
-                        transform: translateY(-1px);
-                        box-shadow: 0 6px 16px rgba(124, 58, 237, 0.3);
+                    .btn:hover { background: #6d28d9; }
+                    .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+                    /* Progress UI */
+                    #progress-container {
+                        display: none;
+                        padding: 10px;
+                        background: var(--vscode-textBlockQuote-background);
+                        border-radius: 6px;
+                        margin-bottom: 10px;
                     }
-                    .btn:active {
-                        transform: translateY(0);
+                    .progress-bar-bg {
+                        height: 4px;
+                        background: var(--vscode-editor-inactiveSelectionBackground);
+                        border-radius: 2px;
+                        margin-top: 8px;
+                        overflow: hidden;
                     }
-                    .btn-secondary {
-                        background: transparent;
-                        border: 1px solid var(--vscode-button-secondaryBackground);
-                        color: var(--vscode-foreground);
-                        margin-top: 5px;
+                    #progress-bar-fill {
+                        height: 100%;
+                        background: #7c3aed;
+                        width: 0%;
+                        transition: width 0.3s;
                     }
-                    .divider {
-                        height: 1px;
-                        background: var(--vscode-divider);
-                        width: 100%;
-                        margin: 10px 0;
-                    }
-                    .card {
-                        background: var(--vscode-welcomePage-tileBackground);
-                        border-radius: 8px;
-                        padding: 12px;
-                        width: 100%;
+                    #progress-status {
                         font-size: 10px;
-                        text-align: left;
+                        opacity: 0.8;
                     }
-                    .card-title {
+
+                    /* Findings */
+                    #findings-list {
+                        display: flex;
+                        flex-direction: column;
+                        gap: 8px;
+                        margin-top: 10px;
+                    }
+                    .finding-item {
+                        padding: 8px;
+                        background: var(--vscode-welcomePage-tileBackground);
+                        border-radius: 6px;
+                        border-left: 3px solid #7c3aed;
+                        font-size: 11px;
+                    }
+                    .finding-severity {
+                        font-size: 9px;
                         font-weight: bold;
+                        text-transform: uppercase;
                         margin-bottom: 4px;
                         display: block;
                     }
+                    .severity-critical { color: #f87171; }
+                    .severity-high { color: #fb923c; }
+                    .severity-medium { color: #facc15; }
                 </style>
 			</head>
 			<body>
 				<div class="container">
-                    <div class="logo-container">
-                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" fill="#7C3AED" fill-opacity="0.2" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M12 8V12" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            <path d="M12 16H12.01" stroke="#7C3AED" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    <div class="header">
+                        <svg class="logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/>
                         </svg>
+                        <h2 class="title">Zenvra Scanner</h2>
                     </div>
-                    <h2 class="title">Zenvra</h2>
-                    <span class="subtitle">Security Scanner</span>
-                    
-                    <div class="divider"></div>
 
                     <button class="btn" id="scan-btn">SCAN CURRENT FILE</button>
-                    
-                    <div class="card">
-                        <span class="card-title">PROTECTION STATUS</span>
-                        AI-powered diagnostics are active. Scan results will appear inline as diagnostics.
+
+                    <div id="progress-container">
+                        <div id="progress-status">Initializing...</div>
+                        <div class="progress-bar-bg">
+                            <div id="progress-bar-fill"></div>
+                        </div>
                     </div>
 
-                    <button class="btn btn-secondary" id="settings-btn">Extension Settings</button>
+                    <div id="findings-list"></div>
                 </div>
                 
                 <script>
                     const vscode = acquireVsCodeApi();
-                    document.getElementById('scan-btn').addEventListener('click', () => {
+                    const scanBtn = document.getElementById('scan-btn');
+                    const progressContainer = document.getElementById('progress-container');
+                    const progressBar = document.getElementById('progress-bar-fill');
+                    const progressStatus = document.getElementById('progress-status');
+                    const findingsList = document.getElementById('findings-list');
+
+                    scanBtn.addEventListener('click', () => {
+                        findingsList.innerHTML = '';
                         vscode.postMessage({ type: 'onScan' });
                     });
-                    document.getElementById('settings-btn').addEventListener('click', () => {
-                        vscode.postMessage({ type: 'onSettings' });
+
+                    window.addEventListener('message', event => {
+                        const message = event.data;
+                        switch (message.type) {
+                            case 'progress':
+                                progressContainer.style.display = 'block';
+                                scanBtn.disabled = true;
+                                progressBar.style.width = message.data.percentage + '%';
+                                progressStatus.innerText = message.data.message;
+                                break;
+                            case 'finding':
+                                const item = document.createElement('div');
+                                item.className = 'finding-item';
+                                const sevClass = 'severity-' + message.data.severity.toLowerCase();
+                                item.innerHTML = \`
+                                    <span class="finding-severity \${sevClass}">\${message.data.severity}</span>
+                                    <strong>\${message.data.title}</strong>
+                                \`;
+                                findingsList.appendChild(item);
+                                break;
+                            case 'complete':
+                                progressContainer.style.display = 'none';
+                                scanBtn.disabled = false;
+                                if (findingsList.innerHTML === '') {
+                                    findingsList.innerHTML = '<div style="font-size: 10px; opacity: 0.5; text-align: center;">No issues found</div>';
+                                }
+                                break;
+                        }
                     });
                 </script>
 			</body>

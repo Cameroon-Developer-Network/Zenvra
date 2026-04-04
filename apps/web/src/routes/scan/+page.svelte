@@ -14,6 +14,8 @@ def get_user(user_id):
 
   let isScanning = $state(false);
   let findings = $state<Finding[]>([]);
+  let scanProgress = $state(0);
+  let scanStatus = $state("Ready to scan");
   let provider = $state("anthropic");
   let model = $state("claude-sonnet-4-20250514");
   let apiKey = $state("");
@@ -28,23 +30,66 @@ def get_user(user_id):
   const runScan = async () => {
     isScanning = true;
     findings = [];
+    scanProgress = 0;
+    scanStatus = "Initializing scan...";
     
     try {
-      const results = await scan({
-        code,
-        language: "python",
-        engines: ["sast", "secrets"],
-        ai_config: apiKey ? {
-          provider,
-          api_key: apiKey,
-          model,
-        } : undefined
+      // Step 1: Start the scan and get a scan_id
+      const response = await fetch("http://localhost:8080/api/v1/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          code,
+          language: "python",
+          engines: ["sast", "secrets"],
+          ai_config: apiKey ? {
+            provider,
+            api_key: apiKey,
+            model,
+          } : undefined
+        })
       });
+
+      if (!response.ok) throw new Error("Failed to start scan");
+      const { scan_id } = await response.json();
+
+      // Step 2: Subscribe to the SSE stream
+      const eventSource = new EventSource(`http://localhost:8080/api/v1/scan/${scan_id}/events`);
+
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        
+        switch (data.type) {
+          case 'progress':
+            scanProgress = data.data.percentage;
+            scanStatus = data.data.message;
+            break;
+          case 'finding':
+            findings = [...findings, data.data];
+            break;
+          case 'complete':
+            scanProgress = 100;
+            scanStatus = "Scan complete!";
+            isScanning = false;
+            eventSource.close();
+            break;
+          case 'error':
+            scanStatus = `Error: ${data.data}`;
+            isScanning = false;
+            eventSource.close();
+            break;
+        }
+      };
+
+      eventSource.onerror = () => {
+        console.error("SSE connection failed");
+        isScanning = false;
+        eventSource.close();
+      };
       
-      findings = results;
     } catch (error) {
       console.error("Scan failed", error);
-    } finally {
+      scanStatus = "Scan failed to initiate";
       isScanning = false;
     }
   };
@@ -135,17 +180,45 @@ def get_user(user_id):
         </div>
         
         <div class="flex-1 overflow-y-auto p-6 space-y-4 custom-scrollbar">
-          {#if isScanning}
-            <div class="flex flex-col items-center justify-center h-full text-center space-y-4">
-              <div class="w-12 h-12 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary animate-bounce">
-                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></svg>
-              </div>
-              <div>
-                <p class="font-bold text-zinc-200">Analyzing Code...</p>
-                <p class="text-xs text-zinc-500 mt-1">Running SAST and Secret engines</p>
+          {#if isScanning || (scanProgress > 0 && scanProgress < 100)}
+            <div class="p-6 mb-4 glass-card border-brand-primary/20 bg-brand-primary/5 slide-in-from-top-4 animate-in duration-500">
+              <div class="flex items-center gap-6">
+                <div class="relative w-16 h-16 flex-shrink-0">
+                  <!-- Circular Progress -->
+                  <svg class="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                    <circle class="text-zinc-800" cx="50" cy="50" r="45" stroke="currentColor" stroke-width="8" fill="none"></circle>
+                    <circle 
+                      class="text-brand-primary transition-all duration-500 ease-out" 
+                      cx="50" cy="50" r="45" 
+                      stroke="currentColor" 
+                      stroke-width="8" 
+                      fill="none"
+                      stroke-dasharray="282.7"
+                      stroke-dashoffset={282.7 - (282.7 * scanProgress) / 100}
+                    ></circle>
+                  </svg>
+                  <div class="absolute inset-0 flex items-center justify-center">
+                    <span class="text-xs font-black text-white">{scanProgress}%</span>
+                  </div>
+                </div>
+                <div class="flex-1 min-w-0">
+                  <div class="flex items-center justify-between mb-2">
+                    <h3 class="font-bold text-sm text-zinc-100 truncate">{scanStatus}</h3>
+                    <span class="text-[10px] font-black text-brand-primary uppercase tracking-tighter animate-pulse">Live</span>
+                  </div>
+                  <!-- Linear Progress Bar -->
+                  <div class="w-full h-1 bg-zinc-800 rounded-full overflow-hidden">
+                    <div 
+                      class="h-full bg-brand-primary transition-all duration-500 ease-out" 
+                      style="width: {scanProgress}%"
+                    ></div>
+                  </div>
+                </div>
               </div>
             </div>
-          {:else if findings.length === 0}
+          {/if}
+
+          {#if findings.length === 0 && !isScanning}
             <div class="flex flex-col items-center justify-center h-full text-center space-y-2 opacity-50">
               <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-600"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/></svg>
               <p class="text-sm font-medium">Ready to scan. Paste your code on the left.</p>

@@ -11,10 +11,11 @@ pub mod finding;
 pub mod language;
 
 pub use engine::Engine;
-pub use finding::{Finding, RawFinding, Severity};
+pub use finding::{Finding, RawFinding, ScanEvent, Severity};
 pub use language::Language;
 
 use serde::{Deserialize, Serialize};
+use tokio::sync::mpsc::UnboundedSender;
 
 /// Configuration for a scan run.
 ///
@@ -38,21 +39,22 @@ pub struct ScanConfig {
     pub file_path: Option<String>,
 }
 
-/// Run a full scan on the provided source code.
-///
-/// # Arguments
-/// * `config` - The scan configuration including code, language, and engines.
-///
-/// # Returns
-/// A list of [`Finding`]s, sorted by severity (critical first).
-pub async fn scan(config: &ScanConfig) -> anyhow::Result<Vec<Finding>> {
-    let raw_findings = engine::run(config).await?;
+/// Run a full scan on the provided source code and stream results via a channel.
+pub async fn scan_stream(
+    config: ScanConfig,
+    tx: UnboundedSender<ScanEvent>,
+) -> anyhow::Result<()> {
+    let raw_findings = match engine::run_stream(&config, tx.clone()).await {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = tx.send(ScanEvent::Error(e.to_string()));
+            return Err(e);
+        }
+    };
 
     // If AI config is provided, enrich findings with explanations and fixes.
-    // Otherwise, return raw findings converted to Finding without AI enrichment.
-    let findings = if let Some(ai_config) = &config.ai_config {
+    if let Some(ai_config) = &config.ai_config {
         let provider = ai::create_provider(ai_config)?;
-        let mut enriched = Vec::with_capacity(raw_findings.len());
         for raw in raw_findings {
             let explanation = match provider.explain(&raw).await {
                 Ok(exp) => exp,
@@ -68,15 +70,45 @@ pub async fn scan(config: &ScanConfig) -> anyhow::Result<Vec<Finding>> {
                     String::new()
                 }
             };
-            enriched.push(raw.into_finding(explanation, fixed_code));
+            let finding = raw.into_finding(explanation, fixed_code);
+            let _ = tx.send(ScanEvent::Finding(finding));
         }
-        enriched
     } else {
-        raw_findings
-            .into_iter()
-            .map(|r| r.into_finding(String::new(), String::new()))
-            .collect()
-    };
+        for raw in raw_findings {
+            let finding = raw.into_finding(String::new(), String::new());
+            let _ = tx.send(ScanEvent::Finding(finding));
+        }
+    }
+
+    let _ = tx.send(ScanEvent::Complete);
+    Ok(())
+}
+
+/// Run a full scan on the provided source code.
+///
+/// # Arguments
+/// * `config` - The scan configuration including code, language, and engines.
+///
+/// # Returns
+/// A list of [`Finding`]s, sorted by severity (critical first).
+pub async fn scan(config: &ScanConfig) -> anyhow::Result<Vec<Finding>> {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let config_clone = config.clone();
+    
+    // Run scan in background and collect findings
+    tokio::spawn(async move {
+        let _ = scan_stream(config_clone, tx).await;
+    });
+
+    let mut findings = Vec::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            ScanEvent::Finding(f) => findings.push(f),
+            ScanEvent::Complete => break,
+            ScanEvent::Error(e) => return Err(anyhow::anyhow!(e)),
+            _ => {}
+        }
+    }
 
     Ok(findings)
 }

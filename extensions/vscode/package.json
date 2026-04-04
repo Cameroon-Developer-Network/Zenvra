@@ -2,7 +2,7 @@
   "name": "zenvra",
   "displayName": "Zenvra — Security Scanner",
   "description": "AI-powered code vulnerability scanner. Detects CVEs, explains risks in plain English, and suggests fixes — inline as you code.",
-  "version": "0.1.1-rc.1",
+  "version": "0.1.1-rc.2",
   "publisher": "cameroon-developer-network",
   "license": "MIT",
   "repository": {
@@ -24,9 +24,7 @@
     "sast"
   ],
   "icon": "assets/icon.png",
-  "activationEvents": [
-    "onView:zenvraMain"
-  ],
+  "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

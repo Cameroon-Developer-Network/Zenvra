@@ -1,17 +1,23 @@
 mod cve_sync;
 
 use axum::{
-    extract::State,
+    extract::{Path, State},
     http::StatusCode,
+    response::sse::{Event, Sse},
     routing::{get, post},
     Json, Router,
 };
 use clap::{Parser, Subcommand};
+use dashmap::DashMap;
+use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
+use tokio::sync::broadcast;
+use tokio_stream::StreamExt as _;
 use tower_http::cors::{Any, CorsLayer};
-use zenvra_scanner::{Finding, Language, ScanConfig};
+use uuid::Uuid;
+use zenvra_scanner::{Finding, Language, ScanConfig, ScanEvent};
 
 #[derive(Parser)]
 #[command(name = "zenvra-server")]
@@ -39,6 +45,7 @@ struct ScanRequest {
 
 struct AppState {
     db: sqlx::PgPool,
+    scans: DashMap<Uuid, broadcast::Sender<ScanEvent>>,
 }
 
 #[tokio::main]
@@ -57,7 +64,7 @@ async fn main() -> anyhow::Result<()> {
     // Database connection
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
-        .max_connections(20) // Expanded for concurrency
+        .max_connections(20)
         .connect(&db_url)
         .await?;
 
@@ -72,7 +79,6 @@ async fn main() -> anyhow::Result<()> {
             return Ok(());
         }
         _ => {
-            // Default to serve
             start_server(pool).await?;
         }
     }
@@ -81,7 +87,10 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
-    let state = Arc::new(AppState { db: pool });
+    let state = Arc::new(AppState { 
+        db: pool,
+        scans: DashMap::new(),
+    });
 
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -91,6 +100,7 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/scan", post(run_scan))
+        .route("/api/v1/scan/:id/events", get(subscribe_to_scan))
         .route("/api/v1/history", get(get_history))
         .route("/api/v1/sync", post(trigger_sync))
         .route("/api/v1/ai/models", post(fetch_ai_models))
@@ -108,16 +118,25 @@ async fn health_check() -> &'static str {
     "OK"
 }
 
+#[derive(serde::Serialize)]
+struct ScanResponse {
+    scan_id: Uuid,
+}
+
 async fn run_scan(
-    State(_state): State<Arc<AppState>>,
+    State(state): State<Arc<AppState>>,
     Json(payload): Json<ScanRequest>,
-) -> Result<Json<Vec<Finding>>, (StatusCode, String)> {
-    tracing::info!("Received scan request for language: {}", payload.language);
+) -> Result<Json<ScanResponse>, (StatusCode, String)> {
+    let scan_id = Uuid::new_v4();
+    tracing::info!("Starting async scan for {}, ID: {}", payload.language, scan_id);
+
+    let (tx, _rx) = broadcast::channel(100);
+    state.scans.insert(scan_id, tx.clone());
 
     let engines = payload
         .engines
         .iter()
-        .filter_map(|e| match e.as_str() {
+        .filter_map(|e: &String| match e.as_str() {
             "sast" => Some(zenvra_scanner::Engine::Sast),
             "sca" => Some(zenvra_scanner::Engine::Sca),
             "secrets" => Some(zenvra_scanner::Engine::Secrets),
@@ -134,97 +153,125 @@ async fn run_scan(
         file_path: None,
     };
 
-    let mut findings = match zenvra_scanner::scan(&config).await {
-        Ok(f) => f,
-        Err(e) => {
-            tracing::error!("Scan failed: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Scan failed internally: {}", e),
-            ));
-        }
-    };
+    let state_task = Arc::clone(&state);
+    let payload_lang = payload.language.clone();
+    
+    // Spawn scan task
+    tokio::spawn(async move {
+        let (scan_tx, mut scan_rx) = tokio::sync::mpsc::unbounded_channel();
+        let config_task = config.clone();
+        
+        tokio::spawn(async move {
+            let _ = zenvra_scanner::scan_stream(config_task, scan_tx).await;
+        });
 
-    // Enrich findings with local CVE metadata
-    let mut severity_counts = std::collections::HashMap::new();
+        let mut findings = Vec::new();
+        let mut severity_counts = std::collections::HashMap::new();
 
-    for finding in &mut findings {
-        let sev_str = finding.severity.to_string().to_lowercase();
-        *severity_counts.entry(sev_str).or_insert(0) += 1;
+        while let Some(event) = scan_rx.recv().await {
+            // Broadcast event to all SSE subscribers
+            let _ = tx.send(event.clone());
 
-        if let Some(cve_id) = &finding.cve_id {
-            let db_finding = sqlx::query(
-                "SELECT title, description, severity FROM vulnerabilities WHERE cve_id = $1"
-            )
-            .bind(cve_id)
-            .fetch_optional(&_state.db)
-            .await;
+            // Process specific events for DB persistence
+            match event {
+                ScanEvent::Finding(mut finding) => {
+                    let sev_str = finding.severity.to_string().to_lowercase();
+                    *severity_counts.entry(sev_str).or_insert(0) += 1;
 
-            if let Ok(Some(row)) = db_finding {
-                use sqlx::Row;
-                finding.title = row.get("title");
-                finding.description = Some(row.get("description"));
-                let severity: String = row.get("severity");
-                finding.severity = match severity.to_lowercase().as_str() {
-                    "critical" => zenvra_scanner::Severity::Critical,
-                    "high" => zenvra_scanner::Severity::High,
-                    "medium" => zenvra_scanner::Severity::Medium,
-                    "low" => zenvra_scanner::Severity::Low,
-                    _ => zenvra_scanner::Severity::Info,
-                };
+                    // Enrich from local DB
+                    if let Some(cve_id) = &finding.cve_id {
+                        if let Ok(Some(row)) = sqlx::query("SELECT title, description FROM vulnerabilities WHERE cve_id = $1")
+                            .bind(cve_id)
+                            .fetch_optional(&state_task.db)
+                            .await 
+                        {
+                            use sqlx::Row;
+                            finding.title = row.get("title");
+                        }
+                    }
+                    
+                    // Persist individual finding
+                    let _ = sqlx::query(
+                        "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+                    )
+                    .bind(scan_id)
+                    .bind(format!("{:?}", finding.engine))
+                    .bind(&finding.cve_id)
+                    .bind(&finding.cwe_id)
+                    .bind(finding.severity.to_string())
+                    .bind(&finding.title)
+                    .bind(&finding.description)
+                    .bind(&finding.vulnerable_code)
+                    .bind(&finding.fixed_code)
+                    .bind(finding.line_start as i32)
+                    .bind(finding.line_end as i32)
+                    .bind(&finding.file_path)
+                    .execute(&state_task.db)
+                    .await;
+                    
+                    findings.push(finding);
+                }
+                ScanEvent::Complete => {
+                    // Finalize scan record
+                    let _ = sqlx::query(
+                        "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
+                         VALUES ($1, $2, $3, $4, $5) 
+                         ON CONFLICT (id) DO UPDATE SET findings_count = $4, severity_counts = $5"
+                    )
+                    .bind(scan_id)
+                    .bind(payload_lang)
+                    .bind("Manual Scan")
+                    .bind(findings.len() as i32)
+                    .bind(serde_json::to_value(&severity_counts).unwrap_or_default())
+                    .execute(&state_task.db)
+                    .await;
+                    
+                    tracing::info!("Scan completed and persisted: {}", scan_id);
+                    break;
+                }
+                ScanEvent::Error(e) => {
+                    tracing::error!("Scan ID {} failed: {}", scan_id, e);
+                    break;
+                }
+                _ => {}
             }
         }
-    }
 
-    // Persist scan history
-    tracing::info!("Starting scan persistence (Findings: {})...", findings.len());
-    let scan_id = match sqlx::query(
-        "INSERT INTO scans (language, target_name, findings_count, severity_counts) 
-         VALUES ($1, $2, $3, $4) RETURNING id"
-    )
-    .bind(payload.language)
-    .bind("Manual Scan")
-    .bind(findings.len() as i32)
-    .bind(serde_json::to_value(&severity_counts).unwrap_or_default())
-    .fetch_one(&_state.db)
-    .await {
-        Ok(row) => {
-            use sqlx::Row;
-            let id = row.get::<uuid::Uuid, _>("id");
-            tracing::info!("Scan record created successfully (ID: {})", id);
-            id
-        },
-        Err(e) => {
-            tracing::error!("Failed to save scan history: {}", e);
-            uuid::Uuid::new_v4()
-        }
-    };
+        // Clean up registry after 5 minutes
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        state_task.scans.remove(&scan_id);
+    });
 
-    // Save individual results
-    for finding in &findings {
-        let _ = sqlx::query(
-            "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
-        )
-        .bind(scan_id)
-        .bind(format!("{:?}", finding.engine))
-        .bind(&finding.cve_id)
-        .bind(&finding.cwe_id)
-        .bind(finding.severity.to_string())
-        .bind(&finding.title)
-        .bind(&finding.description)
-        .bind(&finding.vulnerable_code)
-        .bind(&finding.fixed_code)
-        .bind(finding.line_start as i32)
-        .bind(finding.line_end as i32)
-        .bind(&finding.file_path)
-        .execute(&_state.db)
-        .await;
-    }
-    tracing::info!("Scan persistence complete.");
-
-    Ok(Json(findings))
+    Ok(Json(ScanResponse { scan_id }))
 }
+
+async fn subscribe_to_scan(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
+    let tx = state.scans.get(&id)
+        .ok_or((StatusCode::NOT_FOUND, "Scan not found or already completed".to_string()))?
+        .clone();
+
+    let rx = tx.subscribe();
+    
+    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
+        .filter_map(|msg: Result<ScanEvent, _>| msg.ok())
+        .map(|event: ScanEvent| {
+            Event::default()
+                .json_data(event)
+                .map_err(|e| {
+                    tracing::error!("SSE serialization error: {}", e);
+                })
+        })
+        .filter_map(|res: Result<Event, _>| res.ok())
+        .map(Ok);
+
+    Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
+}
+
+use std::convert::Infallible;
 
 async fn get_history(
     State(state): State<Arc<AppState>>,
@@ -266,7 +313,7 @@ async fn trigger_sync(
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct ModelsRequest {
     provider: String,
     api_key: String,

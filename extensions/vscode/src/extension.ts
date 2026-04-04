@@ -4,11 +4,12 @@ import { SidebarProvider } from './sidebarProvider';
 
 const DIAGNOSTIC_SOURCE = 'Zenvra';
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('zenvra');
+let sidebarProvider: SidebarProvider;
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('Zenvra extension activated');
 
-  const sidebarProvider = new SidebarProvider(context.extensionUri);
+  sidebarProvider = new SidebarProvider(context.extensionUri);
   context.subscriptions.push(
     vscode.window.registerWebviewViewProvider('zenvraMain', sidebarProvider)
   );
@@ -73,7 +74,7 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
     };
   }
 
-  vscode.window.setStatusBarMessage('$(sync~spin) Zenvra: Scanning...', 2000);
+  vscode.window.setStatusBarMessage('$(sync~spin) Zenvra: Initializing...', 2000);
 
   try {
     const response = await fetch(`${apiUrl}/api/v1/scan`, {
@@ -87,14 +88,57 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
       throw new Error(errorMsg || response.statusText);
     }
 
-    const findings = (await response.json()) as Finding[];
-    updateDiagnostics(document, findings);
+    const { scan_id } = (await response.json()) as { scan_id: string };
     
-    const count = findings.length;
-    if (count === 0) {
-      vscode.window.setStatusBarMessage('$(shield) Zenvra: No issues found', 3000);
-    } else {
-      vscode.window.setStatusBarMessage(`$(warning) Zenvra: Found ${count} issue(s)`, 3000);
+    // Subscribe to SSE stream
+    const sseResponse = await fetch(`${apiUrl}/api/v1/scan/${scan_id}/events`);
+    const body = sseResponse.body;
+    if (!body) throw new Error('Failed to connect to event stream');
+
+    const reader = (body as any).getReader();
+    const decoder = new TextDecoder();
+    let findings: Finding[] = [];
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            
+            switch (event.type) {
+              case 'progress':
+                vscode.window.setStatusBarMessage(`$(sync~spin) Zenvra: ${event.data.message}`, 2000);
+                // Also notify sidebar
+                sidebarProvider.postMessage({ type: 'progress', data: event.data });
+                break;
+              case 'finding':
+                findings.push(event.data);
+                updateDiagnostics(document, findings);
+                sidebarProvider.postMessage({ type: 'finding', data: event.data });
+                break;
+              case 'complete':
+                const count = findings.length;
+                if (count === 0) {
+                  vscode.window.setStatusBarMessage('$(shield) Zenvra: No issues found', 3000);
+                } else {
+                  vscode.window.setStatusBarMessage(`$(warning) Zenvra: Found ${count} issue(s)`, 3000);
+                }
+                sidebarProvider.postMessage({ type: 'complete' });
+                return;
+              case 'error':
+                throw new Error(event.data);
+            }
+          } catch (e) {
+            console.error('Error parsing SSE event:', e);
+          }
+        }
+      }
     }
   } catch (err: any) {
     vscode.window.showErrorMessage(`Zenvra Scan Failed: ${err.message}`);

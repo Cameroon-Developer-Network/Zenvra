@@ -32,3 +32,4 @@ coverage
 .idea
 *.swp
 *.swo
+deploy-ghcr.sh

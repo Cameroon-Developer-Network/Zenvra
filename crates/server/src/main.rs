@@ -68,7 +68,7 @@ async fn run_scan(
 
     let config = ScanConfig {
         code: payload.code,
-        language: Language::from_str(&payload.language),
+        language: payload.language.parse().unwrap_or(Language::Unknown),
         engines,
         ai_config: payload.ai_config,
         file_path: None,

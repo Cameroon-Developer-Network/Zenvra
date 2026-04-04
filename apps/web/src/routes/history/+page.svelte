@@ -4,15 +4,23 @@
 
   let history = $state<ScanHistory[]>([]);
   let isLoading = $state(true);
+  let error = $state<string | null>(null);
 
-  onMount(async () => {
+  const fetchHistory = async () => {
+    isLoading = true;
+    error = null;
     try {
       history = await getHistory();
-    } catch (error) {
-      console.error("Failed to load history", error);
+    } catch (err: any) {
+      console.error("Failed to load history", err);
+      error = err.message || "An unexpected error occurred while loading your history.";
     } finally {
       isLoading = false;
     }
+  };
+
+  onMount(() => {
+    fetchHistory();
   });
 
   const formatDate = (dateStr: string) => {
@@ -42,9 +50,17 @@
       <p class="text-zinc-500">Review past security assessments and tracking vulnerability trends.</p>
     </div>
     <div class="flex gap-2">
+      <button 
+        onclick={fetchHistory}
+        disabled={isLoading}
+        class="glass px-4 py-2 rounded-xl border-zinc-800 hover:bg-white/5 transition-all flex items-center gap-2 group"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" class={isLoading ? "animate-spin" : "group-hover:rotate-180 transition-transform duration-500"}><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+        <span class="text-xs font-bold">Refresh</span>
+      </button>
       <div class="glass px-4 py-2 rounded-xl border-zinc-800 flex items-center gap-2">
-         <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Total Scans:</span>
-         <span class="text-sm font-bold">{history.length}</span>
+         <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Total:</span>
+         <span class="text-sm font-bold tracking-widest">{history.length}</span>
       </div>
     </div>
   </div>
@@ -54,6 +70,15 @@
       {#each Array(5) as _}
         <div class="h-24 glass rounded-2xl animate-pulse border-zinc-800/50"></div>
       {/each}
+    </div>
+  {:else if error}
+    <div class="h-[300px] glass rounded-3xl border-red-500/20 bg-red-500/5 flex flex-col items-center justify-center text-center p-12">
+      <div class="w-12 h-12 rounded-xl bg-red-500/10 flex items-center justify-center text-red-500 mb-4">
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+      </div>
+      <h3 class="font-bold text-red-200">Connection Failed</h3>
+      <p class="text-sm text-red-400/70 max-w-sm mt-2">{error}</p>
+      <button onclick={() => window.location.reload()} class="mt-6 px-6 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 text-xs font-bold rounded-xl transition-all">Retry Connection</button>
     </div>
   {:else if history.length === 0}
     <div class="h-[400px] glass rounded-3xl border-zinc-800 border-dashed flex flex-col items-center justify-center text-center p-12">

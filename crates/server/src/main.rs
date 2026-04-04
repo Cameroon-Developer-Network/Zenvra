@@ -57,7 +57,7 @@ async fn main() -> anyhow::Result<()> {
     // Database connection
     let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
     let pool = PgPoolOptions::new()
-        .max_connections(5)
+        .max_connections(20) // Expanded for concurrency
         .connect(&db_url)
         .await?;
 
@@ -176,6 +176,7 @@ async fn run_scan(
     }
 
     // Persist scan history
+    tracing::info!("Starting scan persistence (Findings: {})...", findings.len());
     let scan_id = match sqlx::query(
         "INSERT INTO scans (language, target_name, findings_count, severity_counts) 
          VALUES ($1, $2, $3, $4) RETURNING id"
@@ -188,11 +189,13 @@ async fn run_scan(
     .await {
         Ok(row) => {
             use sqlx::Row;
-            row.get::<uuid::Uuid, _>("id")
+            let id = row.get::<uuid::Uuid, _>("id");
+            tracing::info!("Scan record created successfully (ID: {})", id);
+            id
         },
         Err(e) => {
             tracing::error!("Failed to save scan history: {}", e);
-            uuid::Uuid::new_v4() // Fallback to avoid breaking the scan
+            uuid::Uuid::new_v4()
         }
     };
 
@@ -217,13 +220,14 @@ async fn run_scan(
         .execute(&_state.db)
         .await;
     }
+    tracing::info!("Scan persistence complete.");
 
     Ok(Json(findings))
 }
 
 async fn get_history(
     State(state): State<Arc<AppState>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<axum::response::Response, (StatusCode, String)> {
     let scans = sqlx::query("SELECT * FROM scans ORDER BY created_at DESC LIMIT 50")
         .fetch_all(&state.db)
         .await
@@ -242,7 +246,14 @@ async fn get_history(
         }));
     }
 
-    Ok(Json(serde_json::Value::Array(results)))
+    use axum::response::IntoResponse;
+    let mut response = Json(serde_json::Value::Array(results)).into_response();
+    response.headers_mut().insert(
+        axum::http::header::CACHE_CONTROL,
+        axum::http::HeaderValue::from_static("no-store, no-cache, must-revalidate, max-age=0"),
+    );
+
+    Ok(response)
 }
 
 async fn trigger_sync(

@@ -3,7 +3,7 @@
  * Full implementation tracked in issue #8.
  */
 
-const BASE_URL = import.meta.env.PUBLIC_API_URL ?? 'http://localhost:8080';
+const BASE_URL = (import.meta.env.PUBLIC_API_URL || 'http://localhost:8080').replace(/\/$/, '');
 
 export interface AiConfig {
   provider: string;

@@ -9,6 +9,9 @@
   let availableModels = $state<string[]>([]);
   let isLoadingModels = $state(false);
   let error = $state<string | null>(null);
+  let saveSuccess = $state(false);
+  let savedConfig = $state<{ provider: string; model: string } | null>(null);
+  let successTimer: ReturnType<typeof setTimeout>;
 
   const providers = [
     { id: "anthropic", name: "Anthropic", color: "bg-[#7c3aed]", icon: "A" },
@@ -22,16 +25,12 @@
       error = "Please provide an API key first.";
       return;
     }
-    
     isLoadingModels = true;
     error = null;
     availableModels = [];
-
     try {
       availableModels = await fetchAiModels(provider, apiKey, endpoint);
-      if (availableModels.length > 0) {
-        selectedModel = availableModels[0];
-      }
+      if (availableModels.length > 0) selectedModel = availableModels[0];
     } catch (err: any) {
       error = err.message || "Failed to fetch models. Check your API key and connection.";
     } finally {
@@ -40,17 +39,21 @@
   };
 
   const handleSave = () => {
-     if (!selectedModel) {
-       error = "Please select a model after fetching.";
-       return;
-     }
+    if (!selectedModel) {
+      error = "Please select a model after fetching.";
+      return;
+    }
+    error = null;
+    localStorage.setItem('zenvra_ai_provider', provider);
+    localStorage.setItem('zenvra_ai_model', selectedModel);
+    localStorage.setItem('zenvra_ai_api_key', apiKey);
+    if (endpoint) localStorage.setItem('zenvra_ai_endpoint', endpoint);
+    else localStorage.removeItem('zenvra_ai_endpoint');
 
-     localStorage.setItem('zenvra_ai_provider', provider);
-     localStorage.setItem('zenvra_ai_model', selectedModel);
-     localStorage.setItem('zenvra_ai_api_key', apiKey);
-     if (endpoint) localStorage.setItem('zenvra_ai_endpoint', endpoint);
-     
-     alert("Advanced Configuration saved. Zenvra will now use your authorized " + selectedModel + " model.");
+    savedConfig = { provider, model: selectedModel };
+    saveSuccess = true;
+    clearTimeout(successTimer);
+    successTimer = setTimeout(() => { saveSuccess = false; }, 3500);
   };
 
   onMount(() => {
@@ -58,10 +61,11 @@
     selectedModel = localStorage.getItem('zenvra_ai_model') || "";
     apiKey = localStorage.getItem('zenvra_ai_api_key') || "";
     endpoint = localStorage.getItem('zenvra_ai_endpoint') || "";
-    
     if (selectedModel) {
       availableModels = [selectedModel];
+      savedConfig = { provider, model: selectedModel };
     }
+    return () => clearTimeout(successTimer);
   });
 </script>
 
@@ -71,7 +75,22 @@
       <h1 class="text-3xl font-bold font-outfit mb-2 tracking-tight">AI Settings</h1>
       <p class="text-zinc-500 text-sm">Configure the intelligence engine for vulnerability explanations and fix suggestions.</p>
     </div>
+    <!-- Active config badge -->
+    {#if savedConfig}
+      <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-xs font-bold">
+        <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.6)]"></div>
+        Active: {savedConfig.model}
+      </div>
+    {/if}
   </div>
+
+  <!-- Success Banner -->
+  {#if saveSuccess}
+    <div class="flex items-center gap-3 p-4 rounded-2xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 text-sm font-medium animate-in slide-in-from-top-2 duration-300">
+      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+      Configuration saved. Zenvra will now use <strong class="text-emerald-300 ml-1">{selectedModel}</strong>.
+    </div>
+  {/if}
 
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-8">
     <div class="lg:col-span-2 space-y-6">
@@ -82,7 +101,7 @@
             <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 block">1. Choose Intelligence Provider</span>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               {#each providers as p}
-                <button 
+                <button
                   onclick={() => { provider = p.id; availableModels = []; selectedModel = ""; error = null; }}
                   class="p-4 rounded-2xl border transition-all flex flex-col gap-3 items-center text-center {provider === p.id ? 'border-brand-primary bg-brand-primary/5 ring-1 ring-brand-primary/20' : 'border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700'}"
                 >
@@ -97,31 +116,30 @@
         <!-- Connection Details -->
         <div class="space-y-6 pt-4 border-t border-zinc-800/50">
           <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 block">2. Authentication & Endpoint</span>
-          
           <div class="space-y-4">
             <label class="block">
               <span class="text-xs font-bold text-zinc-400 mb-2 block">API Key</span>
-              <input 
+              <input
                 type="password"
-                bind:value={apiKey} 
-                class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none transition-all" 
+                bind:value={apiKey}
+                class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none transition-all"
                 placeholder="Paste your {provider} secret key..."
               />
             </label>
 
             {#if provider === 'custom'}
-               <label class="block animate-in slide-in-from-top-2">
+              <label class="block animate-in slide-in-from-top-2">
                 <span class="text-xs font-bold text-zinc-400 mb-2 block">Base Endpoint URL</span>
-                <input 
-                  bind:value={endpoint} 
-                  class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none" 
+                <input
+                  bind:value={endpoint}
+                  class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium focus:ring-2 ring-brand-primary outline-none"
                   placeholder="e.g., https://api.groq.com/openai/v1"
                 />
               </label>
             {/if}
 
-            <button 
-              onclick={fetchModels} 
+            <button
+              onclick={fetchModels}
               disabled={isLoadingModels || !apiKey}
               class="w-full py-4 rounded-xl border border-zinc-800 bg-white/5 hover:bg-white/10 text-xs font-bold uppercase tracking-widest transition-all disabled:opacity-50 flex items-center justify-center gap-2"
             >
@@ -136,13 +154,13 @@
           </div>
         </div>
 
-        <!-- Model Selection (Conditional) -->
+        <!-- Model Selection -->
         {#if availableModels.length > 0}
           <div class="space-y-4 pt-6 border-t border-zinc-800/50 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 block">3. Select Authorized Model</span>
             <div class="grid grid-cols-1 gap-2">
               {#each availableModels as m}
-                <button 
+                <button
                   onclick={() => selectedModel = m}
                   class="w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between {selectedModel === m ? 'border-brand-primary bg-brand-primary/10' : 'border-zinc-800 bg-zinc-900/30 hover:border-zinc-700'}"
                 >
@@ -157,16 +175,17 @@
         {/if}
 
         {#if error}
-          <div class="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-medium animate-in shake-2">
+          <div class="p-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium flex items-center gap-2 animate-in fade-in">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
             {error}
           </div>
         {/if}
 
         <div class="pt-4 flex justify-end">
-          <button 
-            onclick={handleSave} 
+          <button
+            onclick={handleSave}
             disabled={!selectedModel}
-            class="btn-primary px-12 py-4 disabled:opacity-30 disabled:cursor-not-allowed shadow-xl shadow-brand-primary/10"
+            class="btn-primary px-12 py-4 disabled:opacity-30 disabled:cursor-not-allowed shadow-xl shadow-brand-primary/10 transition-all"
           >
             Save Configuration
           </button>
@@ -176,7 +195,7 @@
 
     <!-- Info Panel -->
     <div class="space-y-6">
-      <div class="glass p-8 rounded-3xl border-zinc-800 bg-brand-primary/5 relative overflow-hidden group">
+      <div class="glass p-8 rounded-3xl border-zinc-800 bg-brand-primary/5 relative overflow-hidden">
         <h4 class="text-sm font-bold mb-4 flex items-center gap-2">
           <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-brand-primary"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10"/><path d="m9 12 2 2 4-4"/></svg>
           Bring Your Own Key
@@ -187,24 +206,25 @@
       </div>
 
       <div class="glass p-8 rounded-3xl border-zinc-800 space-y-4">
-         <h4 class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Active Policies</h4>
-         <div class="space-y-3">
-           <div class="flex items-center gap-2 text-xs font-medium text-emerald-500">
-             <div class="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
-             Zero Data Training
-           </div>
-           <div class="flex items-center gap-2 text-xs font-medium text-zinc-400">
-             <div class="w-1.5 h-1.5 rounded-full bg-zinc-700 flex items-center justify-center">
-                <div class="w-0.5 h-0.5 rounded-full bg-zinc-500"></div>
-             </div>
-             Encrypted Local Storage
-           </div>
-           <div class="flex items-center gap-2 text-xs font-medium text-zinc-500">
-             <div class="w-1 h-1 rounded-full bg-zinc-500"></div>
-             Rate Limit (10/min)
-           </div>
-         </div>
+        <h4 class="text-xs font-bold text-zinc-400 uppercase tracking-widest">Active Policies</h4>
+        <div class="space-y-3">
+          <div class="flex items-center gap-2 text-xs font-medium text-emerald-500">
+            <div class="w-1 h-1 rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]"></div>
+            Zero Data Training
+          </div>
+          <div class="flex items-center gap-2 text-xs font-medium text-zinc-400">
+            <div class="w-1.5 h-1.5 rounded-full bg-zinc-700 flex items-center justify-center">
+               <div class="w-0.5 h-0.5 rounded-full bg-zinc-500"></div>
+            </div>
+            Encrypted Local Storage
+          </div>
+          <div class="flex items-center gap-2 text-xs font-medium text-zinc-500">
+            <div class="w-1 h-1 rounded-full bg-zinc-500"></div>
+            Rate Limit (10/min)
+          </div>
+        </div>
       </div>
     </div>
   </div>
 </div>
+

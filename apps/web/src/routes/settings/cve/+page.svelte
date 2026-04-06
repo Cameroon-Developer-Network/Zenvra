@@ -14,9 +14,10 @@
       const res = await triggerSync();
       lastSyncStatus = "success";
       statusMessage = res.message;
-    } catch (error: any) {
+    } catch (err: unknown) {
       lastSyncStatus = "error";
-      statusMessage = error.message || "Failed to synchronize vulnerability databases.";
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      statusMessage = errorMsg || "Failed to synchronize vulnerability databases.";
     } finally {
       isSyncing = false;
     }

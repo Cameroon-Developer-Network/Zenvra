@@ -34,8 +34,9 @@
     try {
       availableModels = await fetchAiModels(provider, apiKey, endpoint);
       if (availableModels.length > 0) selectedModel = availableModels[0];
-    } catch (err: any) {
-      error = err.message || "Failed to fetch models. Check your API key and connection.";
+    } catch (err: unknown) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      error = errorMsg || "Failed to fetch models. Check your API key and connection.";
     } finally {
       isLoadingModels = false;
     }
@@ -86,7 +87,7 @@
           <label class="block">
             <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-4 block">1. Choose Intelligence Provider</span>
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-              {#each providers as p}
+              {#each providers as p (p.id)}
                 <button
                   onclick={() => { provider = p.id; availableModels = []; selectedModel = ""; error = null; }}
                   class="p-4 rounded-2xl border transition-all flex flex-col gap-3 items-center text-center {provider === p.id ? 'border-brand-primary bg-brand-primary/5 ring-1 ring-brand-primary/20' : 'border-zinc-800 bg-zinc-900/50 hover:bg-zinc-800 hover:border-zinc-700'}"
@@ -153,7 +154,7 @@
           <div class="space-y-4 pt-6 border-t border-zinc-800/50 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <span class="text-[10px] font-black text-zinc-500 uppercase tracking-[0.2em] mb-2 block">3. Select Authorized Model</span>
             <div class="grid grid-cols-1 gap-2">
-              {#each availableModels as m}
+              {#each availableModels as m (m)}
                 <button
                   onclick={() => selectedModel = m}
                   class="w-full p-4 rounded-xl border text-left transition-all flex items-center justify-between {selectedModel === m ? 'border-brand-primary bg-brand-primary/10' : 'border-zinc-800 bg-zinc-900/30 hover:border-zinc-700'}"

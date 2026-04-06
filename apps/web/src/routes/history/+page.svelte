@@ -11,9 +11,10 @@
     error = null;
     try {
       history = await getHistory();
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Failed to load history", err);
-      error = err.message || "An unexpected error occurred while loading your history.";
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      error = errorMsg || "An unexpected error occurred while loading your history.";
     } finally {
       isLoading = false;
     }
@@ -67,7 +68,7 @@
 
   {#if isLoading}
     <div class="grid grid-cols-1 gap-4">
-      {#each Array(5) as _}
+      {#each Array(5) as _, i (i)}
         <div class="h-24 glass rounded-2xl animate-pulse border-zinc-800/50"></div>
       {/each}
     </div>
@@ -114,7 +115,7 @@
 
             <div class="flex items-center gap-8">
               <div class="flex gap-1.5 item">
-                {#each Object.entries(scan.severity_counts) as [severity, count]}
+                {#each Object.entries(scan.severity_counts) as [severity, count] (severity)}
                   {#if count > 0}
                     <div class="flex flex-col items-center">
                       <div class="w-2 h-2 rounded-full {getSeverityColor(severity)} mb-1 shadow-[0_0_8px_rgba(255,255,255,0.2)]"></div>

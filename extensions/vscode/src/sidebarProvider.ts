@@ -43,13 +43,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     this._view = panel;
   }
 
-  public postMessage(message: any) {
+  public postMessage(message: unknown) {
     if (this._view) {
       this._view.webview.postMessage(message);
     }
   }
 
-  private _getHtmlForWebview(webview: vscode.Webview) {
+  private _getHtmlForWebview(_webview: vscode.Webview) {
     return `<!DOCTYPE html>
 			<html lang="en">
 			<head>

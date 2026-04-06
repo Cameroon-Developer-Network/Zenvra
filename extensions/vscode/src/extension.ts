@@ -97,7 +97,7 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
 
     const reader = (body as any).getReader();
     const decoder = new TextDecoder();
-    let findings: Finding[] = [];
+    const findings: Finding[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -122,7 +122,7 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
                 updateDiagnostics(document, findings);
                 sidebarProvider.postMessage({ type: 'finding', data: event.data });
                 break;
-              case 'complete':
+              case 'complete': {
                 const count = findings.length;
                 if (count === 0) {
                   vscode.window.setStatusBarMessage('$(shield) Zenvra: No issues found', 3000);
@@ -131,6 +131,7 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
                 }
                 sidebarProvider.postMessage({ type: 'complete' });
                 return;
+              }
               case 'error':
                 throw new Error(event.data);
             }
@@ -140,8 +141,9 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
         }
       }
     }
-  } catch (err: any) {
-    vscode.window.showErrorMessage(`Zenvra Scan Failed: ${err.message}`);
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`Zenvra Scan Failed: ${errorMsg}`);
     vscode.window.setStatusBarMessage('$(error) Zenvra: Scan failed', 3000);
   }
 }

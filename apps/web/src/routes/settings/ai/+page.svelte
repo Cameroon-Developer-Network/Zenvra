@@ -1,30 +1,33 @@
 <script lang="ts">
-  import { onMount } from "svelte";
   import { fetchAiModels } from "$lib/api";
+  import { aiConfig } from "$lib/stores/aiConfig.svelte";
 
-  let provider = $state("anthropic");
-  let selectedModel = $state("");
-  let apiKey = $state("");
-  let endpoint = $state("");
-  let availableModels = $state<string[]>([]);
+  // Local editing state — pre-populated from the shared store
+  let provider       = $state(aiConfig.provider);
+  let selectedModel  = $state(aiConfig.model);
+  let apiKey         = $state(aiConfig.apiKey);
+  let endpoint       = $state(aiConfig.endpoint);
+
+  let availableModels = $state<string[]>(aiConfig.model ? [aiConfig.model] : []);
   let isLoadingModels = $state(false);
-  let error = $state<string | null>(null);
-  let saveSuccess = $state(false);
-  let savedConfig = $state<{ provider: string; model: string } | null>(null);
+  let error           = $state<string | null>(null);
+  let saveSuccess     = $state(false);
   let successTimer: ReturnType<typeof setTimeout>;
 
+  // Reflects what's currently committed in the store
+  let savedConfig = $derived(
+    aiConfig.isConfigured ? { provider: aiConfig.provider, model: aiConfig.model } : null
+  );
+
   const providers = [
-    { id: "anthropic", name: "Anthropic", color: "bg-[#7c3aed]", icon: "A" },
-    { id: "openai", name: "OpenAI", color: "bg-[#10a37f]", icon: "O" },
-    { id: "google", name: "Google Gemini", color: "bg-[#4285f4]", icon: "G" },
-    { id: "custom", name: "Custom Provider", color: "bg-zinc-600", icon: "C" }
+    { id: "anthropic", name: "Anthropic",      color: "bg-[#7c3aed]", icon: "A" },
+    { id: "openai",    name: "OpenAI",          color: "bg-[#10a37f]", icon: "O" },
+    { id: "google",    name: "Google Gemini",   color: "bg-[#4285f4]", icon: "G" },
+    { id: "custom",    name: "Custom Provider", color: "bg-zinc-600",  icon: "C" }
   ];
 
   const fetchModels = async () => {
-    if (!apiKey) {
-      error = "Please provide an API key first.";
-      return;
-    }
+    if (!apiKey) { error = "Please provide an API key first."; return; }
     isLoadingModels = true;
     error = null;
     availableModels = [];
@@ -39,34 +42,17 @@
   };
 
   const handleSave = () => {
-    if (!selectedModel) {
-      error = "Please select a model after fetching.";
-      return;
-    }
+    if (!selectedModel.trim()) { error = "Model name is required."; return; }
+    if (!apiKey.trim())        { error = "API key is required.";    return; }
     error = null;
-    localStorage.setItem('zenvra_ai_provider', provider);
-    localStorage.setItem('zenvra_ai_model', selectedModel);
-    localStorage.setItem('zenvra_ai_api_key', apiKey);
-    if (endpoint) localStorage.setItem('zenvra_ai_endpoint', endpoint);
-    else localStorage.removeItem('zenvra_ai_endpoint');
 
-    savedConfig = { provider, model: selectedModel };
+    // Persist via the store — writes localStorage atomically
+    aiConfig.save(provider, selectedModel.trim(), apiKey.trim(), endpoint.trim());
+
     saveSuccess = true;
     clearTimeout(successTimer);
     successTimer = setTimeout(() => { saveSuccess = false; }, 3500);
   };
-
-  onMount(() => {
-    provider = localStorage.getItem('zenvra_ai_provider') || "anthropic";
-    selectedModel = localStorage.getItem('zenvra_ai_model') || "";
-    apiKey = localStorage.getItem('zenvra_ai_api_key') || "";
-    endpoint = localStorage.getItem('zenvra_ai_endpoint') || "";
-    if (selectedModel) {
-      availableModels = [selectedModel];
-      savedConfig = { provider, model: selectedModel };
-    }
-    return () => clearTimeout(successTimer);
-  });
 </script>
 
 <div class="max-w-4xl mx-auto space-y-8 animate-in fade-in duration-500">
@@ -127,6 +113,14 @@
               />
             </label>
 
+            <label class="block">
+              <span class="text-xs font-bold text-zinc-400 mb-2 block">Model Name <span class="text-zinc-600 font-normal">(type directly or fetch below)</span></span>
+              <input
+                bind:value={selectedModel}
+                class="w-full glass bg-zinc-900/50 px-4 py-3 rounded-xl border-zinc-800 text-sm font-medium font-mono focus:ring-2 ring-brand-primary outline-none transition-all"
+                placeholder="e.g. claude-sonnet-4-20250514, gpt-4o, gemini-2.0-flash..."
+              />
+            </label>
             {#if provider === 'custom'}
               <label class="block animate-in slide-in-from-top-2">
                 <span class="text-xs font-bold text-zinc-400 mb-2 block">Base Endpoint URL</span>
@@ -184,7 +178,7 @@
         <div class="pt-4 flex justify-end">
           <button
             onclick={handleSave}
-            disabled={!selectedModel}
+            disabled={!selectedModel.trim() || !apiKey.trim()}
             class="btn-primary px-12 py-4 disabled:opacity-30 disabled:cursor-not-allowed shadow-xl shadow-brand-primary/10 transition-all"
           >
             Save Configuration

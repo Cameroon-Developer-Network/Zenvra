@@ -1,5 +1,7 @@
 <script lang="ts">
+  import { onMount } from "svelte";
   import { scan, type Finding } from "$lib/api";
+  import { aiConfig } from "$lib/stores/aiConfig.svelte";
 
   let code = $state(`// Paste your code here to scan for vulnerabilities
 def get_user(user_id):
@@ -16,16 +18,10 @@ def get_user(user_id):
   let findings = $state<Finding[]>([]);
   let scanProgress = $state(0);
   let scanStatus = $state("Ready to scan");
-  let provider = $state("anthropic");
-  let model = $state("claude-sonnet-4-20250514");
-  let apiKey = $state("");
 
-  import { onMount } from "svelte";
-  onMount(() => {
-    provider = localStorage.getItem('zenvra_ai_provider') || "anthropic";
-    model = localStorage.getItem('zenvra_ai_model') || "claude-sonnet-4-20250514";
-    apiKey = localStorage.getItem('zenvra_ai_api_key') || "";
-  });
+  // Read directly from the shared store — no onMount needed
+  let hasAiConfig = $derived(aiConfig.isConfigured);
+
 
   const runScan = async () => {
     isScanning = true;
@@ -42,10 +38,11 @@ def get_user(user_id):
           code,
           language: "python",
           engines: ["sast", "secrets"],
-          ai_config: apiKey ? {
-            provider,
-            api_key: apiKey,
-            model,
+          ai_config: hasAiConfig ? {
+            provider: aiConfig.provider,
+            api_key:  aiConfig.apiKey,
+            model:    aiConfig.model,
+            endpoint: aiConfig.endpoint || undefined,
           } : undefined
         })
       });
@@ -113,27 +110,27 @@ def get_user(user_id):
     </div>
     
     <div class="flex items-center gap-4">
-      <div class="flex items-center glass p-1 rounded-xl">
-        <select bind:value={provider} class="bg-transparent text-sm font-semibold px-3 py-1 outline-none">
-          <option value="anthropic">Anthropic</option>
-          <option value="openai">OpenAI</option>
-          <option value="google">Google</option>
-          <option value="custom">Custom</option>
-        </select>
-        <div class="w-px h-4 bg-border mx-1"></div>
-        <input 
-          bind:value={model} 
-          class="bg-transparent text-sm text-zinc-400 px-3 py-1 outline-none min-w-[150px]" 
-          placeholder="Model name..."
-        />
-        <div class="w-px h-4 bg-border mx-1"></div>
-        <input 
-          type="password"
-          bind:value={apiKey} 
-          class="bg-transparent text-sm text-zinc-100 px-3 py-1 outline-none min-w-[200px]" 
-          placeholder="API Key (optional)..."
-        />
-      </div>
+      {#if hasAiConfig}
+        <a 
+          href="/settings/ai"
+          class="flex items-center gap-2.5 px-4 py-2 glass rounded-xl border-zinc-800 hover:border-zinc-700 transition-all group"
+          title="AI config loaded from Settings — click to change"
+        >
+          <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]"></div>
+          <span class="text-xs font-bold text-zinc-400 group-hover:text-zinc-200 transition-colors">{provider}</span>
+          <span class="text-zinc-700">/</span>
+          <span class="text-xs font-mono text-zinc-500 group-hover:text-zinc-300 transition-colors max-w-[180px] truncate">{model}</span>
+          <svg class="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors ml-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
+        </a>
+      {:else}
+        <a
+          href="/settings/ai"
+          class="flex items-center gap-2 px-4 py-2 rounded-xl border border-dashed border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-300 transition-all text-xs font-bold"
+        >
+          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
+          No AI config — click to set up
+        </a>
+      {/if}
       <button 
         onclick={runScan} 
         disabled={isScanning || !code.trim()}

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
 use std::sync::Arc;
 use tokio::sync::broadcast;
-use tokio_stream::StreamExt as _;
+use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
 use zenvra_scanner::{Finding, Language, ScanConfig, ScanEvent};
@@ -45,7 +45,10 @@ struct ScanRequest {
 
 struct AppState {
     db: sqlx::PgPool,
+    /// Live broadcast channels for in-progress scans
     scans: DashMap<Uuid, broadcast::Sender<ScanEvent>>,
+    /// Cached events for completed scans (replayed to late subscribers)
+    results: DashMap<Uuid, Vec<ScanEvent>>,
 }
 
 #[tokio::main]
@@ -90,6 +93,7 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
     let state = Arc::new(AppState { 
         db: pool,
         scans: DashMap::new(),
+        results: DashMap::new(),
     });
 
     let cors = CorsLayer::new()
@@ -167,9 +171,13 @@ async fn run_scan(
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
+        let mut all_events: Vec<ScanEvent> = Vec::new();
 
         while let Some(event) = scan_rx.recv().await {
-            // Broadcast event to all SSE subscribers
+            // Cache event for late subscribers
+            all_events.push(event.clone());
+
+            // Broadcast to any connected SSE subscribers
             let _ = tx.send(event.clone());
 
             // Process specific events for DB persistence
@@ -238,9 +246,13 @@ async fn run_scan(
             }
         }
 
-        // Clean up registry after 5 minutes
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        // Move results to cache so late SSE subscribers can replay them
         state_task.scans.remove(&scan_id);
+        state_task.results.insert(scan_id, all_events);
+
+        // Clean up results cache after 5 minutes
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        state_task.results.remove(&scan_id);
     });
 
     Ok(Json(ScanResponse { scan_id }))
@@ -250,23 +262,38 @@ async fn subscribe_to_scan(
     State(state): State<Arc<AppState>>,
     Path(id): Path<Uuid>,
 ) -> Result<Sse<impl Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)> {
-    let tx = state.scans.get(&id)
-        .ok_or((StatusCode::NOT_FOUND, "Scan not found or already completed".to_string()))?
-        .clone();
+    use futures::stream;
 
-    let rx = tx.subscribe();
-    
-    let stream = tokio_stream::wrappers::BroadcastStream::new(rx)
-        .filter_map(|msg: Result<ScanEvent, _>| msg.ok())
-        .map(|event: ScanEvent| {
-            Event::default()
-                .json_data(event)
-                .map_err(|e| {
-                    tracing::error!("SSE serialization error: {}", e);
+    type BoxedStream = std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
+
+    // Case 1: Scan already completed — replay cached events immediately
+    let stream: BoxedStream = if let Some(cached) = state.results.get(&id) {
+        let events: Vec<ScanEvent> = cached.clone();
+        Box::pin(
+            stream::iter(events)
+                .map(move |event| -> Result<Event, Infallible> {
+                    Ok(Event::default()
+                        .json_data(&event)
+                        .unwrap_or_else(|_| Event::default()))
                 })
-        })
-        .filter_map(|res: Result<Event, _>| res.ok())
-        .map(Ok);
+        )
+    } else {
+        // Case 2: Scan is still in progress — subscribe to live broadcast
+        let tx = state.scans.get(&id)
+            .ok_or((StatusCode::NOT_FOUND, "Scan not found".to_string()))?
+            .clone();
+
+        let rx = tx.subscribe();
+        Box::pin(
+            tokio_stream::wrappers::BroadcastStream::new(rx)
+                .filter_map(|msg: Result<ScanEvent, _>| msg.ok())
+                .map(|event: ScanEvent| -> Result<Event, Infallible> {
+                    Ok(Event::default()
+                        .json_data(event)
+                        .unwrap_or_else(|_| Event::default()))
+                })
+        )
+    };
 
     Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
 }

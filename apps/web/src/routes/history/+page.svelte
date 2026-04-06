@@ -68,7 +68,7 @@
 
   {#if isLoading}
     <div class="grid grid-cols-1 gap-4">
-      {#each Array(5) as _, i (i)}
+      {#each Array(5) as __, i (i)}
         <div class="h-24 glass rounded-2xl animate-pulse border-zinc-800/50"></div>
       {/each}
     </div>

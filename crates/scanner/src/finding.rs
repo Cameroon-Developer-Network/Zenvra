@@ -116,7 +116,7 @@ pub enum ScanEvent {
     /// Scan progress update.
     Progress { percentage: u8, message: String },
     /// A new security finding has been detected and enriched.
-    Finding(Finding),
+    Finding(Box<Finding>),
     /// The scan has completed successfully.
     Complete,
     /// A critical error occurred during the scan.

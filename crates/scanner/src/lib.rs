@@ -71,12 +71,12 @@ pub async fn scan_stream(
                 }
             };
             let finding = raw.into_finding(explanation, fixed_code);
-            let _ = tx.send(ScanEvent::Finding(finding));
+            let _ = tx.send(ScanEvent::Finding(Box::new(finding)));
         }
     } else {
         for raw in raw_findings {
             let finding = raw.into_finding(String::new(), String::new());
-            let _ = tx.send(ScanEvent::Finding(finding));
+            let _ = tx.send(ScanEvent::Finding(Box::new(finding)));
         }
     }
 
@@ -103,7 +103,7 @@ pub async fn scan(config: &ScanConfig) -> anyhow::Result<Vec<Finding>> {
     let mut findings = Vec::new();
     while let Some(event) = rx.recv().await {
         match event {
-            ScanEvent::Finding(f) => findings.push(f),
+            ScanEvent::Finding(f) => findings.push(*f),
             ScanEvent::Complete => break,
             ScanEvent::Error(e) => return Err(anyhow::anyhow!(e)),
             _ => {}

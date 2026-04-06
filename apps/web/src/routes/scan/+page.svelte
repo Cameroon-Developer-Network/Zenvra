@@ -21,6 +21,8 @@ def get_user(user_id):
 
   // Read directly from the shared store — no onMount needed
   let hasAiConfig = $derived(aiConfig.isConfigured);
+  let activeProvider = $derived(aiConfig.provider);
+  let activeModel = $derived(aiConfig.model);
 
 
   const runScan = async () => {
@@ -31,7 +33,7 @@ def get_user(user_id):
     
     try {
       // Step 1: Start the scan and get a scan_id
-      const response = await fetch("http://localhost:8080/api/v1/scan", {
+      const response = await fetch(`${aiConfig.apiBaseUrl}/api/v1/scan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -51,7 +53,7 @@ def get_user(user_id):
       const { scan_id } = await response.json();
 
       // Step 2: Subscribe to the SSE stream
-      const eventSource = new EventSource(`http://localhost:8080/api/v1/scan/${scan_id}/events`);
+      const eventSource = new EventSource(`${aiConfig.apiBaseUrl}/api/v1/scan/${scan_id}/events`);
 
       eventSource.onmessage = (event) => {
         const data = JSON.parse(event.data);
@@ -117,9 +119,9 @@ def get_user(user_id):
           title="AI config loaded from Settings — click to change"
         >
           <div class="w-1.5 h-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_rgba(52,211,153,0.7)]"></div>
-          <span class="text-xs font-bold text-zinc-400 group-hover:text-zinc-200 transition-colors">{provider}</span>
+          <span class="text-xs font-bold text-zinc-400 group-hover:text-zinc-200 transition-colors uppercase">{activeProvider}</span>
           <span class="text-zinc-700">/</span>
-          <span class="text-xs font-mono text-zinc-500 group-hover:text-zinc-300 transition-colors max-w-[180px] truncate">{model}</span>
+          <span class="text-xs font-mono text-zinc-500 group-hover:text-zinc-300 transition-colors max-w-[180px] truncate">{activeModel}</span>
           <svg class="w-3 h-3 text-zinc-600 group-hover:text-zinc-400 transition-colors ml-1" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4Z"/></svg>
         </a>
       {:else}

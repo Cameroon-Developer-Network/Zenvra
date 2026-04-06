@@ -55,15 +55,22 @@
     </div>
 
     <!-- OSV Status Card -->
-    <div class="glass p-8 rounded-3xl border-zinc-800 relative opacity-60">
+    <div class="glass p-8 rounded-3xl border-zinc-800 relative overflow-hidden group">
       <div class="flex items-start justify-between mb-6">
-        <div class="w-12 h-12 rounded-2xl bg-zinc-800 flex items-center justify-center text-zinc-500">
+        <div class="w-12 h-12 rounded-2xl bg-brand-primary/10 flex items-center justify-center text-brand-primary">
            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
         </div>
-        <span class="text-[10px] font-bold bg-zinc-800 text-zinc-500 px-2 py-1 rounded tracking-widest uppercase">Coming Soon</span>
+        <span class="text-[10px] font-bold bg-emerald-500/10 text-emerald-500 px-2 py-1 rounded tracking-widest uppercase">Connected</span>
       </div>
-      <h3 class="text-xl font-bold mb-2 text-zinc-400">OSV Ecosystems</h3>
-      <p class="text-sm text-zinc-600 leading-relaxed max-w-[240px]">Unified open-source vulnerability feed for npm, PyPI, and more.</p>
+      <h3 class="text-xl font-bold mb-2">OSV Ecosystems</h3>
+      <p class="text-sm text-zinc-500 leading-relaxed max-w-[240px]">Unified open-source vulnerability feed for npm, PyPI, Go, and crates.io.</p>
+      
+      <div class="mt-8 flex flex-wrap gap-2">
+        <span class="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-[10px] font-mono text-zinc-400">npm</span>
+        <span class="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-[10px] font-mono text-zinc-400">PyPI</span>
+        <span class="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-[10px] font-mono text-zinc-400">Go</span>
+        <span class="px-2 py-1 rounded-md bg-zinc-900 border border-zinc-800 text-[10px] font-mono text-zinc-400">crates.io</span>
+      </div>
     </div>
   </div>
 

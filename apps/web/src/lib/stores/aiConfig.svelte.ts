@@ -15,6 +15,7 @@ function createAiConfigStore() {
   let endpoint = $state(browser ? (localStorage.getItem('zenvra_ai_endpoint') ?? '') : '');
 
   const isConfigured = $derived(!!model && !!apiKey);
+  const apiBaseUrl = browser ? (import.meta.env.PUBLIC_API_URL || 'http://localhost:8080') : 'http://localhost:8080';
 
   /** Persist changes to both reactive state and localStorage atomically. */
   function save(p: string, m: string, key: string, ep: string): void {
@@ -38,6 +39,7 @@ function createAiConfigStore() {
     get apiKey()       { return apiKey; },
     get endpoint()     { return endpoint; },
     get isConfigured() { return isConfigured; },
+    get apiBaseUrl()   { return apiBaseUrl; },
     save,
   };
 }

@@ -17,7 +17,7 @@ use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
 use tower_http::cors::{Any, CorsLayer};
 use uuid::Uuid;
-use zenvra_scanner::{Finding, Language, ScanConfig, ScanEvent};
+use zenvra_scanner::{Language, ScanConfig, ScanEvent};
 
 #[derive(Parser)]
 #[command(name = "zenvra-server")]
@@ -65,11 +65,14 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     // Database connection
-    let db_url = std::env::var("DATABASE_URL").expect("DATABASE_URL must be set");
+    let db_url = std::env::var("DATABASE_URL")
+        .map_err(|_| anyhow::anyhow!("DATABASE_URL environment variable must be set"))?;
+    
     let pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&db_url)
-        .await?;
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to connect to PostgreSQL at {}: {}", db_url, e))?;
 
     // Run migrations
     tracing::info!("Running database migrations...");
@@ -218,7 +221,7 @@ async fn run_scan(
                     .execute(&state_task.db)
                     .await;
                     
-                    findings.push(finding);
+                    findings.push(*finding);
                 }
                 ScanEvent::Complete => {
                     // Finalize scan record
@@ -231,7 +234,7 @@ async fn run_scan(
                     .bind(payload_lang)
                     .bind("Manual Scan")
                     .bind(findings.len() as i32)
-                    .bind(serde_json::to_value(&severity_counts).unwrap_or_default())
+                    .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
                     .execute(&state_task.db)
                     .await;
                     

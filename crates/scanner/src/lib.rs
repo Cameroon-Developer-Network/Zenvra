@@ -22,6 +22,7 @@ use tokio::sync::mpsc::UnboundedSender;
 /// Holds the source code, detected language, which engines to run,
 /// and optional AI provider config for generating explanations.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct ScanConfig {
     /// The source code to scan.
     pub code: String,
@@ -33,9 +34,11 @@ pub struct ScanConfig {
     pub engines: Vec<Engine>,
 
     /// Optional AI provider configuration for explanations and fixes.
+    #[serde(alias = "aiConfig")]
     pub ai_config: Option<ai::AiConfig>,
 
     /// Optional file path for context in findings.
+    #[serde(alias = "filePath")]
     pub file_path: Option<String>,
 }
 

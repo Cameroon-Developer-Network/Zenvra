@@ -89,6 +89,18 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
         anyhow::bail!("NVD API returned error status: {}", status);
     }
 
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+
+    if !content_type.contains("application/json") {
+        let body = response.text().await.unwrap_or_default();
+        error!("NVD API returned non-JSON response: {}", body);
+        anyhow::bail!("NVD API returned non-JSON response");
+    }
+
     let nvd_data = response.json::<NvdResponse>().await?;
 
     for item in nvd_data.vulnerabilities {

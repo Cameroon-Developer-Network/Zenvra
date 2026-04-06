@@ -1,5 +1,7 @@
 -- Enable the trgm extension for fast text search
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
+-- Enable pgcrypto for gen_random_uuid
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 -- Create vulnerabilities table for storing CVE and OSV data
 CREATE TABLE IF NOT EXISTS vulnerabilities (

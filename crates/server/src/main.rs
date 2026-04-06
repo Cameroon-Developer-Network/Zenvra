@@ -173,7 +173,9 @@ async fn run_scan(
         let config_task = config.clone();
 
         tokio::spawn(async move {
-            let _ = zenvra_scanner::scan_stream(config_task, scan_tx).await;
+            if let Err(e) = zenvra_scanner::scan_stream(config_task, scan_tx).await {
+                tracing::error!("Scanner stream error: {}", e);
+            }
         });
 
         let mut findings = Vec::new();
@@ -185,7 +187,9 @@ async fn run_scan(
             all_events.push(event.clone());
 
             // Broadcast to any connected SSE subscribers
-            let _ = tx.send(event.clone());
+            if let Err(e) = tx.send(event.clone()) {
+                tracing::debug!("SSE broadcast error (no active subscribers?): {}", e);
+            }
 
             // Process specific events for DB persistence
             match event {
@@ -208,7 +212,7 @@ async fn run_scan(
                     }
 
                     // Persist individual finding
-                    let _ = sqlx::query(
+                    if let Err(e) = sqlx::query(
                         "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
                          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
                     )
@@ -225,13 +229,15 @@ async fn run_scan(
                     .bind(finding.line_end as i32)
                     .bind(&finding.file_path)
                     .execute(&state_task.db)
-                    .await;
+                    .await {
+                        tracing::error!("Failed to persist finding for scan {}: {}", scan_id, e);
+                    }
 
                     findings.push(*finding);
                 }
                 ScanEvent::Complete => {
                     // Finalize scan record
-                    let _ = sqlx::query(
+                    if let Err(e) = sqlx::query(
                         "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
                          VALUES ($1, $2, $3, $4, $5) 
                          ON CONFLICT (id) DO UPDATE SET findings_count = $4, severity_counts = $5"
@@ -242,7 +248,9 @@ async fn run_scan(
                     .bind(findings.len() as i32)
                     .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
                     .execute(&state_task.db)
-                    .await;
+                    .await {
+                        tracing::error!("Failed to finalize scan {}: {}", scan_id, e);
+                    }
 
                     tracing::info!("Scan completed and persisted: {}", scan_id);
                     break;

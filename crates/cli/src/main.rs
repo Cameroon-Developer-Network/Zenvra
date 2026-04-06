@@ -175,7 +175,12 @@ async fn cmd_config(action: ConfigAction) -> Result<()> {
                 ),
             }
             config.save()?;
-            println!("✅ Config updated: {} set to {}", key, value);
+            let display_value = if key.to_lowercase() == "ai_key" || key.to_lowercase() == "ai_api_key" {
+                "********"
+            } else {
+                &value
+            };
+            println!("✅ Config updated: {} set to {}", key, display_value);
         }
         ConfigAction::Show => {
             use colored::Colorize;

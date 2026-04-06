@@ -39,11 +39,13 @@ impl std::fmt::Display for ProviderKind {
 /// Supports bring-your-own-key: users pass their API key and optionally
 /// a custom endpoint URL for self-hosted or alternative providers.
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub struct AiConfig {
     /// Which provider to use.
     pub provider: ProviderKind,
 
     /// API key for the provider.
+    #[serde(alias = "apiKey")]
     pub api_key: String,
 
     /// Model identifier (e.g. "claude-sonnet-4-20250514", "gpt-4o", "gemini-2.0-flash").

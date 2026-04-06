@@ -25,7 +25,13 @@
     "sast"
   ],
   "icon": "assets/icon.png",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:python",
+    "onLanguage:javascript",
+    "onLanguage:typescript",
+    "onLanguage:rust",
+    "onLanguage:go"
+  ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [

@@ -133,7 +133,8 @@ pub async fn list_models(
         ProviderKind::OpenAi => openai::list_models(api_key, endpoint).await,
         ProviderKind::Google => google::list_models(api_key, endpoint).await,
         ProviderKind::Custom => {
-            let ep = endpoint.ok_or_else(|| anyhow::anyhow!("Custom provider requires an endpoint"))?;
+            let ep =
+                endpoint.ok_or_else(|| anyhow::anyhow!("Custom provider requires an endpoint"))?;
             openai::list_models(api_key, Some(ep)).await
         }
     }

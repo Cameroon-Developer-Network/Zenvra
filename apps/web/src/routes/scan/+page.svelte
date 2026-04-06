@@ -1,6 +1,5 @@
 <script lang="ts">
-  import { onMount } from "svelte";
-  import { scan, type Finding } from "$lib/api";
+  import { type Finding } from "$lib/api";
   import { aiConfig } from "$lib/stores/aiConfig.svelte";
 
   let code = $state(`// Paste your code here to scan for vulnerabilities

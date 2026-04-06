@@ -169,7 +169,10 @@ async fn cmd_config(action: ConfigAction) -> Result<()> {
                 "ai_key" | "ai_api_key" => config.ai_api_key = Some(value.clone()),
                 "ai_model" => config.ai_model = Some(value.clone()),
                 "ai_endpoint" => config.ai_endpoint = Some(value.clone()),
-                _ => anyhow::bail!("Unknown config key: {}. Valid: ai_provider, ai_key, ai_model, ai_endpoint", key),
+                _ => anyhow::bail!(
+                    "Unknown config key: {}. Valid: ai_provider, ai_key, ai_model, ai_endpoint",
+                    key
+                ),
             }
             config.save()?;
             println!("✅ Config updated: {} set to {}", key, value);
@@ -177,7 +180,10 @@ async fn cmd_config(action: ConfigAction) -> Result<()> {
         ConfigAction::Show => {
             use colored::Colorize;
             println!("{}", "Zenvra CLI Configuration:".bold());
-            println!("   Path: {}", ZenvraConfig::get_path().display().to_string().dimmed());
+            println!(
+                "   Path: {}",
+                ZenvraConfig::get_path().display().to_string().dimmed()
+            );
             println!();
             let json = serde_json::to_string_pretty(&config)?;
             println!("{}", json);

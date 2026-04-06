@@ -1,4 +1,7 @@
-use crate::{finding::{RawFinding, ScanEvent}, ScanConfig};
+use crate::{
+    finding::{RawFinding, ScanEvent},
+    ScanConfig,
+};
 use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedSender;
 

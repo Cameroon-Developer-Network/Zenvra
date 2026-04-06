@@ -54,7 +54,7 @@ struct AppState {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     dotenvy::dotenv().ok();
-    
+
     tracing_subscriber::fmt()
         .with_env_filter(
             tracing_subscriber::EnvFilter::from_default_env()
@@ -67,7 +67,7 @@ async fn main() -> anyhow::Result<()> {
     // Database connection
     let db_url = std::env::var("DATABASE_URL")
         .map_err(|_| anyhow::anyhow!("DATABASE_URL environment variable must be set"))?;
-    
+
     let pool = PgPoolOptions::new()
         .max_connections(20)
         .connect(&db_url)
@@ -93,7 +93,7 @@ async fn main() -> anyhow::Result<()> {
 }
 
 async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
-    let state = Arc::new(AppState { 
+    let state = Arc::new(AppState {
         db: pool,
         scans: DashMap::new(),
         results: DashMap::new(),
@@ -135,7 +135,11 @@ async fn run_scan(
     Json(payload): Json<ScanRequest>,
 ) -> Result<Json<ScanResponse>, (StatusCode, String)> {
     let scan_id = Uuid::new_v4();
-    tracing::info!("Starting async scan for {}, ID: {}", payload.language, scan_id);
+    tracing::info!(
+        "Starting async scan for {}, ID: {}",
+        payload.language,
+        scan_id
+    );
 
     let (tx, _rx) = broadcast::channel(100);
     state.scans.insert(scan_id, tx.clone());
@@ -162,12 +166,12 @@ async fn run_scan(
 
     let state_task = Arc::clone(&state);
     let payload_lang = payload.language.clone();
-    
+
     // Spawn scan task
     tokio::spawn(async move {
         let (scan_tx, mut scan_rx) = tokio::sync::mpsc::unbounded_channel();
         let config_task = config.clone();
-        
+
         tokio::spawn(async move {
             let _ = zenvra_scanner::scan_stream(config_task, scan_tx).await;
         });
@@ -191,16 +195,18 @@ async fn run_scan(
 
                     // Enrich from local DB
                     if let Some(cve_id) = &finding.cve_id {
-                        if let Ok(Some(row)) = sqlx::query("SELECT title, description FROM vulnerabilities WHERE cve_id = $1")
-                            .bind(cve_id)
-                            .fetch_optional(&state_task.db)
-                            .await 
+                        if let Ok(Some(row)) = sqlx::query(
+                            "SELECT title, description FROM vulnerabilities WHERE cve_id = $1",
+                        )
+                        .bind(cve_id)
+                        .fetch_optional(&state_task.db)
+                        .await
                         {
                             use sqlx::Row;
                             finding.title = row.get("title");
                         }
                     }
-                    
+
                     // Persist individual finding
                     let _ = sqlx::query(
                         "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
@@ -220,7 +226,7 @@ async fn run_scan(
                     .bind(&finding.file_path)
                     .execute(&state_task.db)
                     .await;
-                    
+
                     findings.push(*finding);
                 }
                 ScanEvent::Complete => {
@@ -237,7 +243,7 @@ async fn run_scan(
                     .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
                     .execute(&state_task.db)
                     .await;
-                    
+
                     tracing::info!("Scan completed and persisted: {}", scan_id);
                     break;
                 }
@@ -273,16 +279,17 @@ async fn subscribe_to_scan(
     let stream: BoxedStream = if let Some(cached) = state.results.get(&id) {
         let events: Vec<ScanEvent> = cached.clone();
         Box::pin(
-            stream::iter(events)
-                .map(move |event| -> Result<Event, Infallible> {
-                    Ok(Event::default()
-                        .json_data(&event)
-                        .unwrap_or_else(|_| Event::default()))
-                })
+            stream::iter(events).map(move |event| -> Result<Event, Infallible> {
+                Ok(Event::default()
+                    .json_data(&event)
+                    .unwrap_or_else(|_| Event::default()))
+            }),
         )
     } else {
         // Case 2: Scan is still in progress — subscribe to live broadcast
-        let tx = state.scans.get(&id)
+        let tx = state
+            .scans
+            .get(&id)
             .ok_or((StatusCode::NOT_FOUND, "Scan not found".to_string()))?
             .clone();
 
@@ -294,7 +301,7 @@ async fn subscribe_to_scan(
                     Ok(Event::default()
                         .json_data(event)
                         .unwrap_or_else(|_| Event::default()))
-                })
+                }),
         )
     };
 
@@ -338,8 +345,13 @@ async fn trigger_sync(
     State(state): State<Arc<AppState>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     match cve_sync::sync_all(&state.db).await {
-        Ok(_) => Ok(Json(serde_json::json!({"status": "success", "message": "Synchronization completed"}))),
-        Err(e) => Err((StatusCode::INTERNAL_SERVER_ERROR, format!("Sync failed: {}", e))),
+        Ok(_) => Ok(Json(
+            serde_json::json!({"status": "success", "message": "Synchronization completed"}),
+        )),
+        Err(e) => Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Sync failed: {}", e),
+        )),
     }
 }
 
@@ -354,8 +366,11 @@ async fn fetch_ai_models(
     State(_state): State<Arc<AppState>>,
     Json(payload): Json<ModelsRequest>,
 ) -> Result<Json<Vec<String>>, (StatusCode, String)> {
-    tracing::info!("Attempting to fetch AI models for provider: {}", payload.provider);
-    
+    tracing::info!(
+        "Attempting to fetch AI models for provider: {}",
+        payload.provider
+    );
+
     let provider = match payload.provider.as_str() {
         "anthropic" => zenvra_scanner::ai::ProviderKind::Anthropic,
         "openai" => zenvra_scanner::ai::ProviderKind::OpenAi,
@@ -367,14 +382,20 @@ async fn fetch_ai_models(
         }
     };
 
-    match zenvra_scanner::ai::list_models(provider, &payload.api_key, payload.endpoint.as_deref()).await {
+    match zenvra_scanner::ai::list_models(provider, &payload.api_key, payload.endpoint.as_deref())
+        .await
+    {
         Ok(models) => {
-            tracing::info!("Successfully fetched {} models for {}", models.len(), payload.provider);
+            tracing::info!(
+                "Successfully fetched {} models for {}",
+                models.len(),
+                payload.provider
+            );
             Ok(Json(models))
-        },
+        }
         Err(e) => {
             tracing::error!("Failed to fetch models for {}: {}", payload.provider, e);
             Err((StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))
-        },
+        }
     }
 }

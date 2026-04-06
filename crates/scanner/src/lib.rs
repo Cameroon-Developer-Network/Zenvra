@@ -40,10 +40,7 @@ pub struct ScanConfig {
 }
 
 /// Run a full scan on the provided source code and stream results via a channel.
-pub async fn scan_stream(
-    config: ScanConfig,
-    tx: UnboundedSender<ScanEvent>,
-) -> anyhow::Result<()> {
+pub async fn scan_stream(config: ScanConfig, tx: UnboundedSender<ScanEvent>) -> anyhow::Result<()> {
     let raw_findings = match engine::run_stream(&config, tx.clone()).await {
         Ok(f) => f,
         Err(e) => {
@@ -94,7 +91,7 @@ pub async fn scan_stream(
 pub async fn scan(config: &ScanConfig) -> anyhow::Result<Vec<Finding>> {
     let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
     let config_clone = config.clone();
-    
+
     // Run scan in background and collect findings
     tokio::spawn(async move {
         let _ = scan_stream(config_clone, tx).await;

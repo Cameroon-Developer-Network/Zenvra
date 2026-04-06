@@ -73,14 +73,16 @@ struct ModelData {
 /// List available models from an OpenAI-compatible API.
 pub async fn list_models(api_key: &str, endpoint: Option<&str>) -> Result<Vec<String>> {
     let client = reqwest::Client::new();
-    let ep = endpoint.unwrap_or("https://api.openai.com").trim_end_matches('/');
-    
+    let ep = endpoint
+        .unwrap_or("https://api.openai.com")
+        .trim_end_matches('/');
+
     let url = if ep.ends_with("/v1") {
         format!("{}/models", ep)
     } else {
         format!("{}/v1/models", ep)
     };
-    
+
     let response = client
         .get(url)
         .header("Authorization", format!("Bearer {}", api_key))
@@ -94,7 +96,10 @@ pub async fn list_models(api_key: &str, endpoint: Option<&str>) -> Result<Vec<St
         anyhow::bail!("OpenAI API returned {status}: {body}");
     }
 
-    let resp: ModelsResponse = response.json().await.context("Failed to parse model list")?;
+    let resp: ModelsResponse = response
+        .json()
+        .await
+        .context("Failed to parse model list")?;
     let mut models: Vec<String> = resp.data.into_iter().map(|m| m.id).collect();
     models.sort();
     Ok(models)

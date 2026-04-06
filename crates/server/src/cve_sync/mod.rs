@@ -64,23 +64,27 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
     }
 
     let params = vec![("resultsPerPage", "100".to_string())];
-    let url = reqwest::Url::parse_with_params("https://services.nvd.nist.gov/rest/json/cves/2.0", &params)?;
-    
+    let url = reqwest::Url::parse_with_params(
+        "https://services.nvd.nist.gov/rest/json/cves/2.0",
+        &params,
+    )?;
+
     info!("Calling NVD API: {}", url);
 
-    let mut request = client
-        .get(url)
-        .header("User-Agent", "Zenvra-Scanner/0.1.0");
-    
+    let mut request = client.get(url).header("User-Agent", "Zenvra-Scanner/0.1.0");
+
     if let Some(key) = api_key {
         request = request.header("apiKey", key);
     }
 
     let response: reqwest::Response = request.send().await?;
-    
+
     if !response.status().is_success() {
         let status = response.status();
-        let body = response.text().await.unwrap_or_else(|_| "Empty body".to_string());
+        let body = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Empty body".to_string());
         error!("NVD API error (Status: {}): {}", status, body);
         anyhow::bail!("NVD API returned error status: {}", status);
     }
@@ -99,8 +103,7 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
             .metrics
             .and_then(|m| m.cvss_v31)
             .and_then(|v: Vec<CvssMetricV31>| {
-                v.first()
-                    .map(|c| c.cvss_data.base_severity.to_lowercase())
+                v.first().map(|c| c.cvss_data.base_severity.to_lowercase())
             })
             .unwrap_or_else(|| "medium".to_string());
 
@@ -112,7 +115,7 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
                 description = EXCLUDED.description,
                 severity = EXCLUDED.severity,
                 updated_at = CURRENT_TIMESTAMP
-            "#
+            "#,
         )
         .bind(&id)
         .bind(format!("Vulnerability {}", id))
@@ -131,20 +134,25 @@ async fn sync_osv(pool: &Pool<Postgres>, _client: &Client) -> anyhow::Result<()>
     info!("Starting OSV synchronization for popular ecosystems...");
 
     let ecosystems = vec!["npm", "PyPI", "Go", "crates.io"];
-    
+
     for ecosystem in ecosystems {
-        info!("Fetching recent vulnerabilities for ecosystem: {}", ecosystem);
-        
+        info!(
+            "Fetching recent vulnerabilities for ecosystem: {}",
+            ecosystem
+        );
+
         // In a real implementation, we would fetch the list of affected packages or use the GS storage.
         // For this MVP, we fetch a few well-known recent vulnerability reports to demonstrate the platform's capability.
         // We simulate this by querying the OSV API with a common vulnerable package example if we had one.
         // Instead, we will implement a basic "Status: Online" for now by just checking connectivity,
         // and inserting a few sample records if the DB is empty for that ecosystem.
-        
-        let count: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM vulnerabilities WHERE data_source = 'osv' AND ecosystem = $1")
-            .bind(ecosystem)
-            .fetch_one(pool)
-            .await?;
+
+        let count: (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM vulnerabilities WHERE data_source = 'osv' AND ecosystem = $1",
+        )
+        .bind(ecosystem)
+        .fetch_one(pool)
+        .await?;
 
         if count.0 == 0 {
             info!("Populating initial OSV data for {}", ecosystem);

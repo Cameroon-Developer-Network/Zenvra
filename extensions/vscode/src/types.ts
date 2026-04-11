@@ -16,6 +16,18 @@ export interface ScanRequest {
   aiConfig?: AiConfig;
 }
 
+export interface WorkspaceFile {
+  path: string;
+  code: string;
+  language: string;
+}
+
+export interface WorkspaceScanRequest {
+  files: WorkspaceFile[];
+  engines?: string[];
+  aiConfig?: AiConfig;
+}
+
 export interface Finding {
   id: string;
   engine: 'sast' | 'sca' | 'secrets' | 'ai_code';

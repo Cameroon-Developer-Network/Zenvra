@@ -43,6 +43,20 @@ struct ScanRequest {
     ai_config: Option<zenvra_scanner::ai::AiConfig>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceScanRequest {
+    files: Vec<WorkspaceFile>,
+    engines: Vec<String>,
+    ai_config: Option<zenvra_scanner::ai::AiConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct WorkspaceFile {
+    path: String,
+    code: String,
+    language: String,
+}
+
 struct AppState {
     db: sqlx::PgPool,
     /// Live broadcast channels for in-progress scans
@@ -107,6 +121,7 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/scan", post(run_scan))
+        .route("/api/v1/scan/workspace", post(run_workspace_scan))
         .route("/api/v1/scan/:id/events", get(subscribe_to_scan))
         .route("/api/v1/history", get(get_history))
         .route("/api/v1/sync", post(trigger_sync))
@@ -270,6 +285,115 @@ async fn run_scan(
         // Clean up results cache after 5 minutes
         tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
         state_task.results.remove(&scan_id);
+    });
+
+    Ok(Json(ScanResponse { scan_id }))
+}
+
+async fn run_workspace_scan(
+    State(state): State<Arc<AppState>>,
+    Json(payload): Json<WorkspaceScanRequest>,
+) -> Result<Json<ScanResponse>, (StatusCode, String)> {
+    let scan_id = Uuid::new_v4();
+    tracing::info!(
+        "Starting async workspace scan for {} files, ID: {}",
+        payload.files.len(),
+        scan_id
+    );
+
+    let (tx, _rx) = broadcast::channel(100);
+    state.scans.insert(scan_id, tx.clone());
+
+    let engines: Vec<zenvra_scanner::Engine> = payload
+        .engines
+        .iter()
+        .filter_map(|e: &String| match e.as_str() {
+            "sast" => Some(zenvra_scanner::Engine::Sast),
+            "sca" => Some(zenvra_scanner::Engine::Sca),
+            "secrets" => Some(zenvra_scanner::Engine::Secrets),
+            "ai_code" => Some(zenvra_scanner::Engine::AiCode),
+            _ => None,
+        })
+        .collect();
+
+    let config = zenvra_scanner::WorkspaceScanConfig {
+        files: payload
+            .files
+            .into_iter()
+            .map(|f| zenvra_scanner::WorkspaceFile {
+                path: f.path,
+                code: f.code,
+                language: zenvra_scanner::Language::from_extension(&f.language),
+            })
+            .collect(),
+        engines,
+        ai_config: payload.ai_config,
+    };
+
+    let tx_task = tx.clone();
+    let state_task = state.clone();
+
+    // Spawn scan task
+    tokio::spawn(async move {
+        let (scan_tx, mut scan_rx) = tokio::sync::mpsc::unbounded_channel();
+        let config_task = config.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = zenvra_scanner::scan_workspace_stream(config_task, scan_tx).await {
+                tracing::error!("Scanner stream error: {}", e);
+            }
+        });
+
+        let mut findings = Vec::new();
+        let mut severity_counts = std::collections::HashMap::new();
+
+        while let Some(event) = scan_rx.recv().await {
+            let _ = tx_task.send(event.clone());
+
+            if let ScanEvent::Finding(finding) = event {
+                let sev_str = finding.severity.to_string().to_lowercase();
+                *severity_counts.entry(sev_str).or_insert(0) += 1;
+
+                // Persist individual finding
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+                )
+                .bind(scan_id)
+                .bind(format!("{:?}", finding.engine))
+                .bind(&finding.cve_id)
+                .bind(&finding.cwe_id)
+                .bind(finding.severity.to_string())
+                .bind(&finding.title)
+                .bind(&finding.description)
+                .bind(&finding.vulnerable_code)
+                .bind(&finding.fixed_code)
+                .bind(finding.line_start as i32)
+                .bind(finding.line_end as i32)
+                .bind(&finding.file_path)
+                .execute(&state_task.db)
+                .await {
+                    tracing::error!("Failed to persist workspace finding: {}", e);
+                }
+                findings.push(*finding);
+            } else if matches!(event, ScanEvent::Complete) {
+                // Finalize scan record
+                if let Err(e) = sqlx::query(
+                    "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
+                     VALUES ($1, $2, $3, $4, $5)"
+                )
+                .bind(scan_id)
+                .bind("Workspace") // Multi-file
+                .bind("Workspace Scan")
+                .bind(findings.len() as i32)
+                .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
+                .execute(&state_task.db)
+                .await {
+                    tracing::error!("Failed to finalize workspace scan: {}", e);
+                }
+                break;
+            }
+        }
     });
 
     Ok(Json(ScanResponse { scan_id }))

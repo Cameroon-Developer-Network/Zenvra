@@ -1,10 +1,11 @@
 import * as vscode from 'vscode';
-import { Finding, ScanRequest } from './types';
+import { Finding, ScanRequest, WorkspaceFile, WorkspaceScanRequest } from './types';
 import { SidebarProvider } from './sidebarProvider';
 
 const DIAGNOSTIC_SOURCE = 'Zenvra';
 const diagnosticCollection = vscode.languages.createDiagnosticCollection('zenvra');
 let sidebarProvider: SidebarProvider;
+let debounceTimer: NodeJS.Timeout | undefined;
 
 export function activate(context: vscode.ExtensionContext): void {
   console.log('Zenvra extension activated');
@@ -31,6 +32,21 @@ export function activate(context: vscode.ExtensionContext): void {
       }
     }),
   );
+
+  // Real-time scan on type if enabled (with debounce)
+  context.subscriptions.push(
+    vscode.workspace.onDidChangeTextDocument((event) => {
+      const config = vscode.workspace.getConfiguration('zenvra');
+      if (config.get<boolean>('scanOnType')) {
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+        debounceTimer = setTimeout(() => {
+          scanDocument(event.document);
+        }, 1500);
+      }
+    })
+  );
 }
 
 export function deactivate(): void {
@@ -47,7 +63,141 @@ async function scanCurrentFile(): Promise<void> {
 }
 
 async function scanWorkspace(): Promise<void> {
-  vscode.window.showInformationMessage('Zenvra: Workspace scan coming in v0.2.');
+  const config = vscode.workspace.getConfiguration('zenvra');
+  const apiUrl = config.get<string>('apiUrl') || 'http://localhost:8080';
+  const aiProvider = config.get<string>('aiProvider');
+  const aiApiKey = config.get<string>('aiApiKey');
+  const aiModel = config.get<string>('aiModel');
+  const aiEndpoint = config.get<string>('aiEndpoint');
+
+  // 1. Find all supported files
+  vscode.window.setStatusBarMessage('$(sync~spin) Zenvra: Collecting files...', 2000);
+  
+  // Supported extensions from CLI main.rs
+  const supportedExtensions = [
+    'py', 'js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'rs', 'go', 'java',
+    'cs', 'cpp', 'cc', 'c', 'h', 'rb', 'php', 'swift', 'kt', 'kts',
+    'yaml', 'yml', 'toml', 'json', 'xml', 'env', 'sh', 'bash', 'zsh',
+    'dockerfile', 'svelte', 'vue'
+  ];
+  
+  const globPattern = `**/*.{${supportedExtensions.join(',')}}`;
+  const excludePattern = '{**/node_modules/**,**/target/**,**/.git/**,**/dist/**,**/build/**}';
+  
+  const files = await vscode.workspace.findFiles(globPattern, excludePattern, 100); // Limit to 100 for now
+  
+  if (files.length === 0) {
+    vscode.window.showInformationMessage('Zenvra: No scannable files found in workspace.');
+    return;
+  }
+
+  const workspaceFiles: WorkspaceFile[] = await Promise.all(
+    files.map(async (uri) => {
+      const content = await vscode.workspace.fs.readFile(uri);
+      const relativePath = vscode.workspace.asRelativePath(uri);
+      const ext = relativePath.split('.').pop() || 'js';
+      
+      return {
+        path: relativePath,
+        code: Buffer.from(content).toString('utf8'),
+        language: ext
+      };
+    })
+  );
+
+  const scanRequest: WorkspaceScanRequest = {
+    files: workspaceFiles,
+    engines: config.get<string[]>('engines'),
+  };
+
+  if (aiProvider && aiApiKey) {
+    scanRequest.aiConfig = {
+      provider: aiProvider,
+      apiKey: aiApiKey,
+      model: aiModel || 'default',
+      endpoint: aiEndpoint || undefined,
+    };
+  }
+
+  try {
+    const response = await fetch(`${apiUrl}/api/v1/scan/workspace`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(scanRequest),
+    });
+
+    if (!response.ok) {
+      const errorMsg = await response.text();
+      throw new Error(errorMsg || response.statusText);
+    }
+
+    const { scan_id } = (await response.json()) as { scan_id: string };
+    
+    // Subscribe to SSE stream
+    const sseResponse = await fetch(`${apiUrl}/api/v1/scan/${scan_id}/events`);
+    const body = sseResponse.body;
+    if (!body) throw new Error('Failed to connect to event stream');
+
+    const reader = (body as any).getReader();
+    const decoder = new TextDecoder();
+    const allFindings: Record<string, Finding[]> = {};
+
+    sidebarProvider.postMessage({ type: 'progress', data: { message: `Scanning ${files.length} files...`, percentage: 10 } });
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      const chunk = decoder.decode(value, { stream: true });
+      const lines = chunk.split('\n');
+
+      for (const line of lines) {
+        if (line.startsWith('data: ')) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            
+            switch (event.type) {
+              case 'progress':
+                vscode.window.setStatusBarMessage(`$(sync~spin) Zenvra: ${event.data.message}`, 2000);
+                sidebarProvider.postMessage({ type: 'progress', data: event.data });
+                break;
+              case 'finding': {
+                const finding = event.data as Finding;
+                const filePath = finding.file_path || 'unknown';
+                if (!allFindings[filePath]) {
+                  allFindings[filePath] = [];
+                }
+                allFindings[filePath].push(finding);
+                
+                // Update diagnostics for this specific file
+                const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+                if (workspaceFolder) {
+                    const fileUri = vscode.Uri.joinPath(workspaceFolder.uri, filePath);
+                    updateDiagnosticsForUri(fileUri, allFindings[filePath]);
+                }
+                
+                sidebarProvider.postMessage({ type: 'finding', data: finding });
+                break;
+              }
+              case 'complete': {
+                const totalCount = Object.values(allFindings).flat().length;
+                vscode.window.setStatusBarMessage(`$(shield) Zenvra: Workspace scan complete (${totalCount} issues)`, 5000);
+                sidebarProvider.postMessage({ type: 'complete' });
+                return;
+              }
+              case 'error':
+                throw new Error(event.data);
+            }
+          } catch (e) {
+            console.error('Error parsing SSE event:', e);
+          }
+        }
+      }
+    }
+  } catch (err: unknown) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`Zenvra Workspace Scan Failed: ${errorMsg}`);
+  }
 }
 
 async function scanDocument(document: vscode.TextDocument): Promise<void> {
@@ -149,10 +299,14 @@ async function scanDocument(document: vscode.TextDocument): Promise<void> {
 }
 
 function updateDiagnostics(document: vscode.TextDocument, findings: Finding[]): void {
+  updateDiagnosticsForUri(document.uri, findings);
+}
+
+function updateDiagnosticsForUri(uri: vscode.Uri, findings: Finding[]): void {
   const diagnostics: vscode.Diagnostic[] = findings.map((f) => {
-    // VS Code lines are 0-indexed, Zenvra is 1-indexed (standard terminal behavior)
+    // VS Code lines are 0-indexed, Zenvra is 1-indexed
     const line = Math.max(0, f.line_start - 1);
-    const range = new vscode.Range(line, 0, line, 0); // TODO: improve range mapping
+    const range = new vscode.Range(line, 0, line, 500); // 500 to cover most lines
 
     let severity = vscode.DiagnosticSeverity.Warning;
     if (f.severity === 'critical' || f.severity === 'high') {
@@ -173,7 +327,7 @@ function updateDiagnostics(document: vscode.TextDocument, findings: Finding[]): 
     return d;
   });
 
-  diagnosticCollection.set(document.uri, diagnostics);
+  diagnosticCollection.set(uri, diagnostics);
 }
 
 async function setApiToken(context: vscode.ExtensionContext): Promise<void> {

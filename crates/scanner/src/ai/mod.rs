@@ -73,14 +73,14 @@ pub trait AiProvider: Send + Sync {
 ///
 /// # Errors
 /// Returns an error if the config is invalid (e.g. custom provider without endpoint).
-pub fn create_provider(config: &AiConfig) -> Result<Box<dyn AiProvider>> {
+pub fn create_provider(config: &AiConfig) -> Result<std::sync::Arc<dyn AiProvider>> {
     match config.provider {
         ProviderKind::Anthropic => {
             let endpoint = config
                 .endpoint
                 .clone()
                 .unwrap_or_else(|| "https://api.anthropic.com".to_string());
-            Ok(Box::new(anthropic::AnthropicProvider::new(
+            Ok(std::sync::Arc::new(anthropic::AnthropicProvider::new(
                 config.api_key.clone(),
                 config.model.clone(),
                 endpoint,
@@ -91,7 +91,7 @@ pub fn create_provider(config: &AiConfig) -> Result<Box<dyn AiProvider>> {
                 .endpoint
                 .clone()
                 .unwrap_or_else(|| "https://api.openai.com".to_string());
-            Ok(Box::new(openai::OpenAiProvider::new(
+            Ok(std::sync::Arc::new(openai::OpenAiProvider::new(
                 config.api_key.clone(),
                 config.model.clone(),
                 endpoint,
@@ -102,7 +102,7 @@ pub fn create_provider(config: &AiConfig) -> Result<Box<dyn AiProvider>> {
                 .endpoint
                 .clone()
                 .unwrap_or_else(|| "https://generativelanguage.googleapis.com".to_string());
-            Ok(Box::new(google::GoogleProvider::new(
+            Ok(std::sync::Arc::new(google::GoogleProvider::new(
                 config.api_key.clone(),
                 config.model.clone(),
                 endpoint,
@@ -113,7 +113,7 @@ pub fn create_provider(config: &AiConfig) -> Result<Box<dyn AiProvider>> {
                 .endpoint
                 .clone()
                 .ok_or_else(|| anyhow::anyhow!("Custom provider requires an endpoint URL"))?;
-            Ok(Box::new(custom::CustomProvider::new(
+            Ok(std::sync::Arc::new(custom::CustomProvider::new(
                 config.api_key.clone(),
                 config.model.clone(),
                 endpoint,

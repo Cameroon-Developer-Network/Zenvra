@@ -3,7 +3,6 @@
   "displayName": "Zenvra — Security Scanner",
   "description": "AI-powered code vulnerability scanner. Detects CVEs, explains risks in plain English, and suggests fixes — inline as you code.",
   "version": "0.1.1-rc.2",
-  "type": "module",
   "publisher": "cameroon-developer-network",
   "license": "MIT",
   "repository": {
@@ -26,11 +25,7 @@
   ],
   "icon": "assets/icon.png",
   "activationEvents": [
-    "onLanguage:python",
-    "onLanguage:javascript",
-    "onLanguage:typescript",
-    "onLanguage:rust",
-    "onLanguage:go"
+    "onView:zenvraMain"
   ],
   "main": "./out/extension.js",
   "contributes": {
@@ -99,6 +94,11 @@
           "type": "boolean",
           "default": true,
           "description": "Automatically scan files when saved"
+        },
+        "zenvra.scanOnType": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically scan the file as you type (real-time feedback). Uses a 1.5s debounce."
         },
         "zenvra.engines": {
           "type": "array",

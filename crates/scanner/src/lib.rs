@@ -42,6 +42,35 @@ pub struct ScanConfig {
     pub file_path: Option<String>,
 }
 
+/// Configuration for a workspace scan (multiple files).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkspaceScanConfig {
+    /// The files to scan in this workspace batch.
+    pub files: Vec<WorkspaceFile>,
+
+    /// Which scan engines to run.
+    pub engines: Vec<Engine>,
+
+    /// Optional AI provider configuration.
+    #[serde(alias = "aiConfig")]
+    pub ai_config: Option<ai::AiConfig>,
+}
+
+/// A single file in a workspace scan.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub struct WorkspaceFile {
+    /// The source code content.
+    pub code: String,
+
+    /// Programming language.
+    pub language: Language,
+
+    /// Relative or absolute path for categorization.
+    pub path: String,
+}
+
 /// Run a full scan on the provided source code and stream results via a channel.
 pub async fn scan_stream(config: ScanConfig, tx: UnboundedSender<ScanEvent>) -> anyhow::Result<()> {
     let raw_findings = match engine::run_stream(&config, tx.clone()).await {
@@ -55,24 +84,7 @@ pub async fn scan_stream(config: ScanConfig, tx: UnboundedSender<ScanEvent>) -> 
     // If AI config is provided, enrich findings with explanations and fixes.
     if let Some(ai_config) = &config.ai_config {
         let provider = ai::create_provider(ai_config)?;
-        for raw in raw_findings {
-            let explanation = match provider.explain(&raw).await {
-                Ok(exp) => exp,
-                Err(e) => {
-                    tracing::warn!("AI explain failed for {}: {}", raw.title, e);
-                    String::from("AI explanation unavailable.")
-                }
-            };
-            let fixed_code = match provider.generate_fix(&raw).await {
-                Ok(fix) => fix,
-                Err(e) => {
-                    tracing::warn!("AI fix generation failed for {}: {}", raw.title, e);
-                    String::new()
-                }
-            };
-            let finding = raw.into_finding(explanation, fixed_code);
-            let _ = tx.send(ScanEvent::Finding(Box::new(finding)));
-        }
+        enrich_and_send(raw_findings, provider, tx.clone()).await?;
     } else {
         for raw in raw_findings {
             let finding = raw.into_finding(String::new(), String::new());
@@ -81,6 +93,78 @@ pub async fn scan_stream(config: ScanConfig, tx: UnboundedSender<ScanEvent>) -> 
     }
 
     let _ = tx.send(ScanEvent::Complete);
+    Ok(())
+}
+
+/// Run a batch scan on multiple files in a workspace.
+pub async fn scan_workspace_stream(
+    config: WorkspaceScanConfig,
+    tx: UnboundedSender<ScanEvent>,
+) -> anyhow::Result<()> {
+    let ai_provider = if let Some(ai_conf) = &config.ai_config {
+        Some(ai::create_provider(ai_conf)?)
+    } else {
+        None
+    };
+
+    for file in config.files {
+        let file_config = ScanConfig {
+            code: file.code,
+            language: file.language,
+            engines: config.engines.clone(),
+            ai_config: config.ai_config.clone(), // We keep this for engine level visibility
+            file_path: Some(file.path),
+        };
+
+        let raw_findings = match engine::run_stream(&file_config, tx.clone()).await {
+            Ok(f) => f,
+            Err(e) => {
+                tracing::error!(
+                    "Engine failed for {}: {}",
+                    file_config.file_path.as_ref().unwrap(),
+                    e
+                );
+                continue;
+            }
+        };
+
+        if let Some(ref provider) = ai_provider {
+            enrich_and_send(raw_findings, provider.clone(), tx.clone()).await?;
+        } else {
+            for raw in raw_findings {
+                let finding = raw.into_finding(String::new(), String::new());
+                let _ = tx.send(ScanEvent::Finding(Box::new(finding)));
+            }
+        }
+    }
+
+    let _ = tx.send(ScanEvent::Complete);
+    Ok(())
+}
+
+async fn enrich_and_send(
+    raw_findings: Vec<RawFinding>,
+    provider: std::sync::Arc<dyn ai::AiProvider>,
+    tx: UnboundedSender<ScanEvent>,
+) -> anyhow::Result<()> {
+    for raw in raw_findings {
+        let explanation = match provider.explain(&raw).await {
+            Ok(exp) => exp,
+            Err(e) => {
+                tracing::warn!("AI explain failed for {}: {}", raw.title, e);
+                String::from("AI explanation unavailable.")
+            }
+        };
+        let fixed_code = match provider.generate_fix(&raw).await {
+            Ok(fix) => fix,
+            Err(e) => {
+                tracing::warn!("AI fix generation failed for {}: {}", raw.title, e);
+                String::new()
+            }
+        };
+        let finding = raw.into_finding(explanation, fixed_code);
+        let _ = tx.send(ScanEvent::Finding(Box::new(finding)));
+    }
     Ok(())
 }
 

@@ -26,6 +26,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           vscode.commands.executeCommand('zenvra.scanFile');
           break;
         }
+        case 'onScanWorkspace': {
+          vscode.commands.executeCommand('zenvra.scanWorkspace');
+          break;
+        }
         case 'onSettings': {
           vscode.commands.executeCommand('workbench.action.openSettings', 'zenvra');
           break;
@@ -49,12 +53,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
   }
 
-  private _getHtmlForWebview(_webview: vscode.Webview) {
+  private _getHtmlForWebview(webview: vscode.Webview) {
+    const nonce = getNonce();
+
     return `<!DOCTYPE html>
 			<html lang="en">
 			<head>
 				<meta charset="UTF-8">
 				<meta name="viewport" content="width=device-width, initial-scale=1.0">
+				<meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';">
 				<title>Zenvra</title>
                 <style>
                     body { 
@@ -97,6 +104,15 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         transition: all 0.2s;
                     }
                     .btn:hover { background: #6d28d9; }
+                    .btn-secondary {
+                        background: transparent;
+                        border: 1px solid #7c3aed;
+                        color: #7c3aed;
+                        margin-top: 8px;
+                    }
+                    .btn-secondary:hover {
+                        background: #7c3aed1a;
+                    }
                     .btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
                     /* Progress UI */
@@ -161,6 +177,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     </div>
 
                     <button class="btn" id="scan-btn">SCAN CURRENT FILE</button>
+                    <button class="btn btn-secondary" id="scan-ws-btn">SCAN WORKSPACE</button>
 
                     <div id="progress-container">
                         <div id="progress-status">Initializing...</div>
@@ -172,9 +189,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                     <div id="findings-list"></div>
                 </div>
                 
-                <script>
+                <script nonce="${nonce}">
                     const vscode = acquireVsCodeApi();
                     const scanBtn = document.getElementById('scan-btn');
+                    const scanWsBtn = document.getElementById('scan-ws-btn');
                     const progressContainer = document.getElementById('progress-container');
                     const progressBar = document.getElementById('progress-bar-fill');
                     const progressStatus = document.getElementById('progress-status');
@@ -185,28 +203,38 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
                         vscode.postMessage({ type: 'onScan' });
                     });
 
+                    scanWsBtn.addEventListener('click', () => {
+                        findingsList.innerHTML = '';
+                        vscode.postMessage({ type: 'onScanWorkspace' });
+                    });
+
                     window.addEventListener('message', event => {
                         const message = event.data;
                         switch (message.type) {
                             case 'progress':
-                                progressContainer.style.display = 'block';
-                                scanBtn.disabled = true;
-                                progressBar.style.width = message.data.percentage + '%';
-                                progressStatus.innerText = message.data.message;
+                                if (message.data) {
+                                    progressContainer.style.display = 'block';
+                                    scanBtn.disabled = true;
+                                    scanWsBtn.disabled = true;
+                                    progressBar.style.width = (message.data.percentage || 0) + '%';
+                                    progressStatus.innerText = message.data.message || 'Processing...';
+                                }
                                 break;
                             case 'finding':
-                                const item = document.createElement('div');
-                                item.className = 'finding-item';
-                                const sevClass = 'severity-' + message.data.severity.toLowerCase();
-                                item.innerHTML = \`
-                                    <span class="finding-severity \${sevClass}">\${message.data.severity}</span>
-                                    <strong>\${message.data.title}</strong>
-                                \`;
-                                findingsList.appendChild(item);
+                                if (message.data) {
+                                    const item = document.createElement('div');
+                                    item.className = 'finding-item';
+                                    const severity = message.data.severity || 'info';
+                                    const sevClass = 'severity-' + severity.toLowerCase();
+                                    item.innerHTML = '<span class="finding-severity ' + sevClass + '">' + severity + '</span>' +
+                                                    '<strong>' + (message.data.title || 'Vulnerability detected') + '</strong>';
+                                    findingsList.appendChild(item);
+                                }
                                 break;
                             case 'complete':
                                 progressContainer.style.display = 'none';
                                 scanBtn.disabled = false;
+                                scanWsBtn.disabled = false;
                                 if (findingsList.innerHTML === '') {
                                     findingsList.innerHTML = '<div style="font-size: 10px; opacity: 0.5; text-align: center;">No issues found</div>';
                                 }
@@ -217,4 +245,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 			</body>
 			</html>`;
   }
+}
+
+function getNonce() {
+  let text = '';
+  const possible = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  for (let i = 0; i < 32; i++) {
+    text += possible.charAt(Math.floor(Math.random() * possible.length));
+  }
+  return text;
 }

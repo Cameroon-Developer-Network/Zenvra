@@ -19,5 +19,5 @@ clap.workspace = true
 tracing.workspace = true
 tracing-subscriber.workspace = true
 colored = "2"
-indicatif = "0.17"
+indicatif = "0.18"
 walkdir = "2"

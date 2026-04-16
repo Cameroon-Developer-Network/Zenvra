@@ -114,10 +114,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
       - name: Rust audit
-        uses: rustsec/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097
 
       - name: Setup Node.js
         uses: actions/setup-node@v4

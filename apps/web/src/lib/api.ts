@@ -135,6 +135,16 @@ export async function getHistory(): Promise<ScanHistory[]> {
 }
 
 /**
+ * Aggregate statistics derived from scan history.
+ */
+export interface DashboardStats {
+  totalScans: number;
+  totalFindings: number;
+  criticalCount: number;
+  recentScans: ScanHistory[];
+}
+
+/**
  * Trigger a manual synchronization with vulnerability databases.
  */
 export async function triggerSync(): Promise<{ status: string; message: string }> {

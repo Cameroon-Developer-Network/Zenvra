@@ -347,8 +347,8 @@ async fn run_scan(
 
                     // Persist individual finding
                     if let Err(e) = sqlx::query(
-                        "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
-                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+                        "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, explanation, vulnerable_code, fixed_code, line_start, line_end, file_path)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
                     )
                     .bind(scan_id)
                     .bind(format!("{:?}", finding.engine))
@@ -357,8 +357,9 @@ async fn run_scan(
                     .bind(finding.severity.to_string())
                     .bind(&finding.title)
                     .bind(&finding.description)
+                    .bind(if finding.explanation.is_empty() { None } else { Some(&finding.explanation) })
                     .bind(&finding.vulnerable_code)
-                    .bind(&finding.fixed_code)
+                    .bind(if finding.fixed_code.is_empty() { None } else { Some(&finding.fixed_code) })
                     .bind(finding.line_start as i32)
                     .bind(finding.line_end as i32)
                     .bind(&finding.file_path)
@@ -489,8 +490,10 @@ async fn run_workspace_scan(
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
+        let mut all_events: Vec<ScanEvent> = Vec::new();
 
         while let Some(event) = scan_rx.recv().await {
+            all_events.push(event.clone());
             let _ = tx_task.send(event.clone());
 
             if let ScanEvent::Finding(finding) = event {
@@ -499,8 +502,8 @@ async fn run_workspace_scan(
 
                 // Persist individual finding
                 if let Err(e) = sqlx::query(
-                    "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, vulnerable_code, fixed_code, line_start, line_end, file_path)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)"
+                    "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, explanation, vulnerable_code, fixed_code, line_start, line_end, file_path)
+                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
                 )
                 .bind(scan_id)
                 .bind(format!("{:?}", finding.engine))
@@ -509,8 +512,9 @@ async fn run_workspace_scan(
                 .bind(finding.severity.to_string())
                 .bind(&finding.title)
                 .bind(&finding.description)
+                .bind(if finding.explanation.is_empty() { None } else { Some(&finding.explanation) })
                 .bind(&finding.vulnerable_code)
-                .bind(&finding.fixed_code)
+                .bind(if finding.fixed_code.is_empty() { None } else { Some(&finding.fixed_code) })
                 .bind(finding.line_start as i32)
                 .bind(finding.line_end as i32)
                 .bind(&finding.file_path)
@@ -537,6 +541,13 @@ async fn run_workspace_scan(
                 break;
             }
         }
+
+        // Cache events for late SSE subscribers (5-minute TTL)
+        state_task.scans.remove(&scan_id);
+        state_task.results.insert(scan_id, all_events);
+
+        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        state_task.results.remove(&scan_id);
     });
 
     Ok(Json(ScanResponse { scan_id }))
@@ -591,7 +602,7 @@ async fn get_scan_results(
     Path(id): Path<Uuid>,
 ) -> Result<axum::response::Response, (StatusCode, String)> {
     let rows = sqlx::query(
-        "SELECT id, engine, cve_id, cwe_id, severity, title, description, \
+        "SELECT id, engine, cve_id, cwe_id, severity, title, description, explanation, \
                 vulnerable_code, fixed_code, line_start, line_end, file_path, created_at \
          FROM scan_results WHERE scan_id = $1 ORDER BY created_at ASC",
     )
@@ -611,7 +622,7 @@ async fn get_scan_results(
             "severity":        row.get::<String, _>("severity"),
             "title":           row.get::<String, _>("title"),
             "description":     row.get::<Option<String>, _>("description"),
-            "explanation":     "",   // AI explanation not stored; shown during live stream
+            "explanation":     row.get::<Option<String>, _>("explanation").unwrap_or_default(),
             "vulnerable_code": row.get::<String, _>("vulnerable_code"),
             "fixed_code":      row.get::<Option<String>, _>("fixed_code").unwrap_or_default(),
             "line_start":      row.get::<i32, _>("line_start"),

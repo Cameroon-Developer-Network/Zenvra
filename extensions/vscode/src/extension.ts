@@ -303,7 +303,23 @@ function updateDiagnostics(document: vscode.TextDocument, findings: Finding[]): 
 }
 
 function updateDiagnosticsForUri(uri: vscode.Uri, findings: Finding[]): void {
-  const diagnostics: vscode.Diagnostic[] = findings.map((f) => {
+  const config = vscode.workspace.getConfiguration('zenvra');
+  const minSeverity = config.get<string>('minSeverity') || 'medium';
+
+  const severityOrder: Record<string, number> = {
+    info: 0,
+    low: 1,
+    medium: 2,
+    high: 3,
+    critical: 4,
+  };
+  const minLevel = severityOrder[minSeverity.toLowerCase()] ?? 2;
+
+  const filtered = findings.filter(
+    (f) => (severityOrder[f.severity.toLowerCase()] ?? 0) >= minLevel
+  );
+
+  const diagnostics: vscode.Diagnostic[] = filtered.map((f) => {
     // VS Code lines are 0-indexed, Zenvra is 1-indexed
     const line = Math.max(0, f.line_start - 1);
     const range = new vscode.Range(line, 0, line, 500); // 500 to cover most lines

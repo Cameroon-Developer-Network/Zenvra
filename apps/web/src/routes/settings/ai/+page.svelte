@@ -211,7 +211,7 @@
             <div class="w-1.5 h-1.5 rounded-full bg-zinc-700 flex items-center justify-center">
                <div class="w-0.5 h-0.5 rounded-full bg-zinc-500"></div>
             </div>
-            Encrypted Local Storage
+            Browser Local Storage (plaintext)
           </div>
           <div class="flex items-center gap-2 text-xs font-medium text-zinc-500">
             <div class="w-1 h-1 rounded-full bg-zinc-500"></div>

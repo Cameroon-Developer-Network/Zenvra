@@ -1,8 +1,10 @@
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use sqlx::{Pool, Postgres};
 use std::env;
-use tracing::{error, info};
+use tracing::{error, info, warn};
+
+// ── NVD API types ─────────────────────────────────────────────────────────────
 
 #[derive(Debug, Deserialize)]
 struct NvdResponse {
@@ -45,17 +47,101 @@ struct CvssData {
     base_severity: String,
 }
 
+// ── OSV API types ─────────────────────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct OsvQueryRequest {
+    package: OsvPackageRef,
+}
+
+#[derive(Debug, Serialize)]
+struct OsvPackageRef {
+    name: String,
+    ecosystem: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvQueryResponse {
+    vulns: Option<Vec<OsvVuln>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvVuln {
+    id: String,
+    summary: Option<String>,
+    aliases: Option<Vec<String>>,
+    severity: Option<Vec<OsvSeverity>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OsvSeverity {
+    r#type: String,
+    score: String,
+}
+
+// ── Well-known vulnerable packages used to seed the local DB ─────────────────
+
+/// Pairs of (ecosystem, package_name) to query on each sync.
+/// Covers commonly vulnerable packages across major ecosystems.
+const SEED_PACKAGES: &[(&str, &str)] = &[
+    // npm
+    ("npm", "lodash"),
+    ("npm", "minimist"),
+    ("npm", "node-fetch"),
+    ("npm", "axios"),
+    ("npm", "express"),
+    ("npm", "json5"),
+    ("npm", "qs"),
+    ("npm", "semver"),
+    ("npm", "path-to-regexp"),
+    ("npm", "ws"),
+    // PyPI
+    ("PyPI", "Django"),
+    ("PyPI", "Flask"),
+    ("PyPI", "Pillow"),
+    ("PyPI", "cryptography"),
+    ("PyPI", "requests"),
+    ("PyPI", "PyYAML"),
+    ("PyPI", "paramiko"),
+    ("PyPI", "sqlalchemy"),
+    ("PyPI", "urllib3"),
+    ("PyPI", "certifi"),
+    // Go
+    ("Go", "github.com/gin-gonic/gin"),
+    ("Go", "golang.org/x/crypto"),
+    ("Go", "golang.org/x/net"),
+    ("Go", "github.com/golang-jwt/jwt"),
+    ("Go", "gopkg.in/yaml.v3"),
+    // crates.io
+    ("crates.io", "openssl"),
+    ("crates.io", "rustls"),
+    ("crates.io", "hyper"),
+    ("crates.io", "tokio"),
+    ("crates.io", "serde"),
+    // Maven
+    ("Maven", "log4j-core"),
+    ("Maven", "spring-core"),
+    ("Maven", "commons-collections"),
+    ("Maven", "jackson-databind"),
+];
+
 /// Sync all vulnerability data sources.
 pub async fn sync_all(pool: &Pool<Postgres>) -> anyhow::Result<()> {
     info!("Starting full CVE synchronization...");
 
-    let client = Client::new();
+    let client = Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .user_agent("Zenvra-Scanner/0.1.0")
+        .build()?;
+
     sync_nvd(pool, &client).await?;
     sync_osv(pool, &client).await?;
 
     info!("CVE synchronization completed successfully.");
     Ok(())
 }
+
+// ── NVD sync ─────────────────────────────────────────────────────────────────
 
 async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> {
     let api_key = env::var("NVD_API_KEY").ok();
@@ -102,6 +188,7 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
     }
 
     let nvd_data = response.json::<NvdResponse>().await?;
+    let mut upserted = 0usize;
 
     for item in nvd_data.vulnerabilities {
         let cve = item.cve;
@@ -136,58 +223,124 @@ async fn sync_nvd(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> 
         .bind("nvd")
         .execute(pool)
         .await?;
+
+        upserted += 1;
     }
 
-    info!("NVD sync completed.");
+    info!("NVD sync completed. Upserted {} CVEs.", upserted);
     Ok(())
 }
 
-async fn sync_osv(pool: &Pool<Postgres>, _client: &Client) -> anyhow::Result<()> {
-    info!("Starting OSV synchronization for popular ecosystems...");
+// ── OSV sync ──────────────────────────────────────────────────────────────────
 
-    let ecosystems = vec!["npm", "PyPI", "Go", "crates.io"];
+async fn sync_osv(pool: &Pool<Postgres>, client: &Client) -> anyhow::Result<()> {
+    info!(
+        "Starting OSV synchronization for {} seed packages...",
+        SEED_PACKAGES.len()
+    );
 
-    for ecosystem in ecosystems {
-        info!(
-            "Fetching recent vulnerabilities for ecosystem: {}",
-            ecosystem
-        );
+    let mut total = 0usize;
 
-        // In a real implementation, we would fetch the list of affected packages or use the GS storage.
-        // For this MVP, we fetch a few well-known recent vulnerability reports to demonstrate the platform's capability.
-        // We simulate this by querying the OSV API with a common vulnerable package example if we had one.
-        // Instead, we will implement a basic "Status: Online" for now by just checking connectivity,
-        // and inserting a few sample records if the DB is empty for that ecosystem.
+    for (ecosystem, package_name) in SEED_PACKAGES {
+        match fetch_osv_vulns(client, ecosystem, package_name).await {
+            Ok(vulns) => {
+                for vuln in vulns {
+                    // Extract a CVE alias if available, otherwise use OSV ID.
+                    let cve_id = vuln
+                        .aliases
+                        .as_ref()
+                        .and_then(|aliases| aliases.iter().find(|a| a.starts_with("CVE-")))
+                        .cloned()
+                        .unwrap_or_else(|| vuln.id.clone());
 
-        let count: (i64,) = sqlx::query_as(
-            "SELECT COUNT(*) FROM vulnerabilities WHERE data_source = 'osv' AND ecosystem = $1",
-        )
-        .bind(ecosystem)
-        .fetch_one(pool)
-        .await?;
+                    let severity = vuln
+                        .severity
+                        .as_deref()
+                        .and_then(|s| s.iter().find(|e| e.r#type.contains("CVSS")))
+                        .map(|s| cvss_score_to_severity(&s.score))
+                        .unwrap_or("medium");
 
-        if count.0 == 0 {
-            info!("Populating initial OSV data for {}", ecosystem);
-            let sample_id = format!("OSV-{}-SAMPLE-001", ecosystem.to_uppercase());
-            sqlx::query(
-                r#"
-                INSERT INTO vulnerabilities (cve_id, title, description, severity, data_source, ecosystem, package_name)
-                VALUES ($1, $2, $3, $4, $5, $6, $7)
-                ON CONFLICT (cve_id) DO NOTHING
-                "#
-            )
-            .bind(&sample_id)
-            .bind(format!("Sample Vulnerability in {}", ecosystem))
-            .bind(format!("Automatically monitored advisory for {} packages. More details will be fetched during deep scans.", ecosystem))
-            .bind("medium")
-            .bind("osv")
-            .bind(ecosystem)
-            .bind("sample-package")
-            .execute(pool)
-            .await?;
+                    let description = vuln
+                        .summary
+                        .clone()
+                        .unwrap_or_else(|| format!("Vulnerability in {}", package_name));
+
+                    let result = sqlx::query(
+                        r#"
+                        INSERT INTO vulnerabilities
+                            (cve_id, title, description, severity, data_source, ecosystem, package_name)
+                        VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        ON CONFLICT (cve_id) DO UPDATE SET
+                            description   = EXCLUDED.description,
+                            severity      = EXCLUDED.severity,
+                            ecosystem     = EXCLUDED.ecosystem,
+                            package_name  = EXCLUDED.package_name,
+                            updated_at    = CURRENT_TIMESTAMP
+                        "#,
+                    )
+                    .bind(&cve_id)
+                    .bind(format!("{} ({}@{})", vuln.id, package_name, ecosystem))
+                    .bind(&description)
+                    .bind(severity)
+                    .bind("osv")
+                    .bind(ecosystem)
+                    .bind(package_name)
+                    .execute(pool)
+                    .await;
+
+                    match result {
+                        Ok(_) => total += 1,
+                        Err(e) => warn!("Failed to upsert OSV vuln {}: {}", cve_id, e),
+                    }
+                }
+            }
+            Err(e) => {
+                warn!("OSV fetch failed for {}/{}: {}", ecosystem, package_name, e);
+            }
         }
     }
 
-    info!("OSV synchronization completed.");
+    info!("OSV sync completed. Upserted {} advisories.", total);
     Ok(())
+}
+
+/// Query the OSV `/v1/query` endpoint for a specific package.
+async fn fetch_osv_vulns(
+    client: &Client,
+    ecosystem: &str,
+    package_name: &str,
+) -> anyhow::Result<Vec<OsvVuln>> {
+    let body = OsvQueryRequest {
+        package: OsvPackageRef {
+            name: package_name.to_string(),
+            ecosystem: ecosystem.to_string(),
+        },
+    };
+
+    let response = client
+        .post("https://api.osv.dev/v1/query")
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("OSV API returned {}", response.status());
+    }
+
+    let result: OsvQueryResponse = response.json().await?;
+    Ok(result.vulns.unwrap_or_default())
+}
+
+/// Convert a CVSS score string like "7.5" to a severity label.
+fn cvss_score_to_severity(score: &str) -> &'static str {
+    let n: f32 = score.split('/').next().and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    if n >= 9.0 {
+        "critical"
+    } else if n >= 7.0 {
+        "high"
+    } else if n >= 4.0 {
+        "medium"
+    } else {
+        "low"
+    }
 }

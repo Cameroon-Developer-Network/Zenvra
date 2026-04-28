@@ -24,3 +24,4 @@ clap = { workspace = true, features = ["derive"] }
 reqwest = { workspace = true }
 dashmap = "6"
 tokio-stream = { version = "0.1", features = ["sync"] }
+bytes = "1"

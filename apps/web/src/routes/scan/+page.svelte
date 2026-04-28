@@ -2,6 +2,25 @@
   import { type Finding } from "$lib/api";
   import { aiConfig } from "$lib/stores/aiConfig.svelte";
 
+  const LANGUAGES = [
+    { value: "python",     label: "Python" },
+    { value: "javascript", label: "JavaScript" },
+    { value: "typescript", label: "TypeScript" },
+    { value: "rust",       label: "Rust" },
+    { value: "go",         label: "Go" },
+    { value: "java",       label: "Java" },
+    { value: "csharp",     label: "C#" },
+    { value: "cpp",        label: "C++" },
+    { value: "c",          label: "C" },
+    { value: "ruby",       label: "Ruby" },
+    { value: "php",        label: "PHP" },
+    { value: "swift",      label: "Swift" },
+    { value: "kotlin",     label: "Kotlin" },
+    { value: "unknown",    label: "Auto-detect" },
+  ];
+
+  let selectedLanguage = $state("python");
+
   let code = $state(`// Paste your code here to scan for vulnerabilities
 def get_user(user_id):
     # Potential SQL Injection
@@ -23,6 +42,12 @@ def get_user(user_id):
   let activeProvider = $derived(aiConfig.provider);
   let activeModel = $derived(aiConfig.model);
 
+  // Active tab: 'single' | 'workspace'
+  let activeTab = $state<'single' | 'workspace'>('single');
+
+  // Workspace tab state
+  let workspaceFiles = $state<{ name: string; language: string; content: string }[]>([]);
+  let workspaceError = $state<string | null>(null);
 
   const runScan = async () => {
     isScanning = true;
@@ -37,8 +62,8 @@ def get_user(user_id):
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           code,
-          language: "python",
-          engines: ["sast", "secrets"],
+          language: selectedLanguage,
+          engines: ["sast", "secrets", "ai_code"],
           ai_config: hasAiConfig ? {
             provider: aiConfig.provider,
             api_key:  aiConfig.apiKey,
@@ -92,6 +117,109 @@ def get_user(user_id):
     }
   };
 
+  const runWorkspaceScan = async () => {
+    if (workspaceFiles.length === 0) {
+      workspaceError = "Add at least one file before scanning.";
+      return;
+    }
+    isScanning = true;
+    findings = [];
+    scanProgress = 0;
+    scanStatus = "Initializing workspace scan...";
+    workspaceError = null;
+
+    try {
+      const response = await fetch(`${aiConfig.apiBaseUrl}/api/v1/scan/workspace`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          files: workspaceFiles.map(f => ({
+            path: f.name,
+            code: f.content,
+            language: f.language,
+          })),
+          engines: ["sast", "secrets", "ai_code"],
+          ai_config: hasAiConfig ? {
+            provider: aiConfig.provider,
+            api_key:  aiConfig.apiKey,
+            model:    aiConfig.model,
+            endpoint: aiConfig.endpoint || undefined,
+          } : undefined
+        })
+      });
+
+      if (!response.ok) throw new Error("Failed to start workspace scan");
+      const { scan_id } = await response.json();
+
+      const eventSource = new EventSource(`${aiConfig.apiBaseUrl}/api/v1/scan/${scan_id}/events`);
+
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        switch (data.type) {
+          case 'progress':
+            scanProgress = data.data.percentage;
+            scanStatus = data.data.message;
+            break;
+          case 'finding':
+            findings = [...findings, data.data];
+            break;
+          case 'complete':
+            scanProgress = 100;
+            scanStatus = "Scan complete!";
+            isScanning = false;
+            eventSource.close();
+            break;
+          case 'error':
+            scanStatus = `Error: ${data.data}`;
+            isScanning = false;
+            eventSource.close();
+            break;
+        }
+      };
+
+      eventSource.onerror = () => {
+        isScanning = false;
+        eventSource.close();
+      };
+    } catch (error) {
+      console.error("Workspace scan failed", error);
+      scanStatus = "Scan failed to initiate";
+      isScanning = false;
+    }
+  };
+
+  const handleFileUpload = (event: Event) => {
+    const input = event.target as HTMLInputElement;
+    const files = input.files;
+    if (!files) return;
+
+    Array.from(files).forEach(file => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const content = e.target?.result as string;
+        const ext = file.name.split('.').pop()?.toLowerCase() ?? '';
+        const langMap: Record<string, string> = {
+          py: 'python', js: 'javascript', mjs: 'javascript', cjs: 'javascript',
+          ts: 'typescript', tsx: 'typescript', rs: 'rust', go: 'go',
+          java: 'java', cs: 'csharp', cpp: 'cpp', cc: 'cpp', c: 'c',
+          rb: 'ruby', php: 'php', swift: 'swift', kt: 'kotlin',
+        };
+        workspaceFiles = [...workspaceFiles, {
+          name: file.name,
+          language: langMap[ext] ?? 'unknown',
+          content,
+        }];
+      };
+      reader.readAsText(file);
+    });
+    // Reset input so the same files can be re-added if removed
+    input.value = '';
+  };
+
+  const removeWorkspaceFile = (index: number) => {
+    workspaceFiles = workspaceFiles.filter((_, i) => i !== index);
+  };
+
   const getSeverityColor = (sev: string) => {
     switch(sev.toLowerCase()) {
       case "critical": return "bg-red-500 text-white";
@@ -132,39 +260,127 @@ def get_user(user_id):
           No AI config — click to set up
         </a>
       {/if}
-      <button 
-        onclick={runScan} 
-        disabled={isScanning || !code.trim()}
-        class="btn-primary flex items-center gap-2 {isScanning ? 'animate-pulse' : ''}"
-      >
-        {#if isScanning}
-          <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
-          Scanning...
-        {:else}
-          Run Scan
-        {/if}
-      </button>
+
+      <!-- Run button — context-sensitive to active tab -->
+      {#if activeTab === 'single'}
+        <button 
+          onclick={runScan} 
+          disabled={isScanning || !code.trim()}
+          class="btn-primary flex items-center gap-2 {isScanning ? 'animate-pulse' : ''}"
+        >
+          {#if isScanning}
+            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Scanning...
+          {:else}
+            Run Scan
+          {/if}
+        </button>
+      {:else}
+        <button 
+          onclick={runWorkspaceScan} 
+          disabled={isScanning || workspaceFiles.length === 0}
+          class="btn-primary flex items-center gap-2 {isScanning ? 'animate-pulse' : ''}"
+        >
+          {#if isScanning}
+            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path></svg>
+            Scanning...
+          {:else}
+            Scan Workspace
+          {/if}
+        </button>
+      {/if}
     </div>
   </div>
 
+  <!-- Tab switcher -->
+  <div class="flex gap-1 p-1 glass rounded-xl border-zinc-800 w-fit">
+    <button
+      onclick={() => activeTab = 'single'}
+      class="px-4 py-2 rounded-lg text-xs font-bold transition-all {activeTab === 'single' ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' : 'text-zinc-500 hover:text-zinc-200'}"
+    >
+      Single File
+    </button>
+    <button
+      onclick={() => activeTab = 'workspace'}
+      class="px-4 py-2 rounded-lg text-xs font-bold transition-all {activeTab === 'workspace' ? 'bg-brand-primary text-white shadow-lg shadow-brand-primary/20' : 'text-zinc-500 hover:text-zinc-200'}"
+    >
+      Workspace
+    </button>
+  </div>
+
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-8 flex-1 min-h-0">
-    <!-- Code Editor Area -->
+    <!-- Left Panel: Code Editor or Workspace Upload -->
     <div class="flex flex-col gap-4">
-      <div class="flex-1 glass rounded-2xl overflow-hidden border-zinc-800 flex flex-col relative group">
-        <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
-          <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Input Code</span>
-          <div class="flex gap-1.5">
-            <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
-            <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
-            <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
-          </div>
+      {#if activeTab === 'single'}
+        <!-- Language Selector -->
+        <div class="flex items-center gap-3">
+          <label class="text-xs font-bold text-zinc-500 uppercase tracking-widest whitespace-nowrap">Language</label>
+          <select
+            bind:value={selectedLanguage}
+            class="glass bg-zinc-900/80 px-3 py-2 rounded-xl border border-zinc-800 text-xs font-medium text-zinc-300 focus:ring-2 ring-brand-primary outline-none transition-all flex-1"
+          >
+            {#each LANGUAGES as lang (lang.value)}
+              <option value={lang.value}>{lang.label}</option>
+            {/each}
+          </select>
         </div>
-        <textarea
-          bind:value={code}
-          class="flex-1 bg-transparent p-6 font-mono text-sm resize-none outline-none text-zinc-300 leading-relaxed custom-scrollbar"
-          spellcheck="false"
-        ></textarea>
-      </div>
+
+        <div class="flex-1 glass rounded-2xl overflow-hidden border-zinc-800 flex flex-col relative group">
+          <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
+            <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Input Code</span>
+            <div class="flex gap-1.5">
+              <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
+              <div class="w-2.5 h-2.5 rounded-full bg-zinc-800"></div>
+            </div>
+          </div>
+          <textarea
+            bind:value={code}
+            class="flex-1 bg-transparent p-6 font-mono text-sm resize-none outline-none text-zinc-300 leading-relaxed custom-scrollbar"
+            spellcheck="false"
+          ></textarea>
+        </div>
+      {:else}
+        <!-- Workspace: file upload area -->
+        <div class="flex-1 glass rounded-2xl border-zinc-800 flex flex-col overflow-hidden">
+          <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
+            <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Files ({workspaceFiles.length})</span>
+            <label class="cursor-pointer text-xs font-bold text-brand-primary hover:text-brand-primary/80 transition-colors flex items-center gap-1.5">
+              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              Add Files
+              <input type="file" multiple accept=".py,.js,.mjs,.cjs,.ts,.tsx,.rs,.go,.java,.cs,.cpp,.cc,.c,.rb,.php,.swift,.kt" onchange={handleFileUpload} class="hidden" />
+            </label>
+          </div>
+
+          <div class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
+            {#if workspaceFiles.length === 0}
+              <div class="flex flex-col items-center justify-center h-full text-center space-y-3 opacity-50 py-12">
+                <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="text-zinc-600"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                <p class="text-sm font-medium">Click "Add Files" to upload source files for scanning.</p>
+              </div>
+            {:else}
+              {#each workspaceFiles as file, i (i)}
+                <div class="flex items-center justify-between p-3 glass-card border-zinc-800 rounded-xl">
+                  <div class="flex items-center gap-3 min-w-0">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="text-zinc-500 flex-shrink-0"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/></svg>
+                    <span class="text-xs font-mono text-zinc-300 truncate">{file.name}</span>
+                    <span class="text-[10px] font-bold bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded flex-shrink-0">{file.language}</span>
+                  </div>
+                  <button onclick={() => removeWorkspaceFile(i)} class="text-zinc-600 hover:text-red-400 transition-colors flex-shrink-0 ml-2">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                  </button>
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          {#if workspaceError}
+            <div class="p-3 m-4 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-medium">
+              {workspaceError}
+            </div>
+          {/if}
+        </div>
+      {/if}
     </div>
 
     <!-- Results Area -->
@@ -173,7 +389,7 @@ def get_user(user_id):
         <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
           <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Findings ({findings.length})</span>
           {#if findings.length > 0}
-             <button class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Clear</button>
+             <button onclick={() => { findings = []; scanProgress = 0; scanStatus = "Ready to scan"; }} class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Clear</button>
           {/if}
         </div>
         

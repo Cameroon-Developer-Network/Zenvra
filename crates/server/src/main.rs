@@ -1,7 +1,8 @@
 mod cve_sync;
 
 use axum::{
-    extract::{Path, State},
+    body::Bytes,
+    extract::{ConnectInfo, Path, State},
     http::StatusCode,
     response::sse::{Event, Sse},
     routing::{get, post},
@@ -12,12 +13,24 @@ use dashmap::DashMap;
 use futures::stream::Stream;
 use serde::{Deserialize, Serialize};
 use sqlx::postgres::PgPoolOptions;
-use std::sync::Arc;
+use std::{
+    net::SocketAddr,
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use tokio::sync::broadcast;
 use tokio_stream::StreamExt;
-use tower_http::cors::{Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use uuid::Uuid;
 use zenvra_scanner::{Language, ScanConfig, ScanEvent};
+
+/// Maximum allowed scan request body size (512 KiB).
+const MAX_SCAN_BODY_BYTES: usize = 512 * 1024;
+
+/// Rate-limit window duration.
+const RATE_WINDOW: Duration = Duration::from_secs(60);
+/// Maximum scan requests per IP per window.
+const RATE_LIMIT: u32 = 10;
 
 #[derive(Parser)]
 #[command(name = "zenvra-server")]
@@ -57,12 +70,44 @@ struct WorkspaceFile {
     language: String,
 }
 
+/// Per-IP rate-limit state.
+struct RateEntry {
+    count: u32,
+    window_start: Instant,
+}
+
 struct AppState {
     db: sqlx::PgPool,
-    /// Live broadcast channels for in-progress scans
+    /// Live broadcast channels for in-progress scans.
     scans: DashMap<Uuid, broadcast::Sender<ScanEvent>>,
-    /// Cached events for completed scans (replayed to late subscribers)
+    /// Cached events for completed scans (replayed to late subscribers).
     results: DashMap<Uuid, Vec<ScanEvent>>,
+    /// Per-IP request counters for rate limiting.
+    rate_limits: DashMap<String, RateEntry>,
+}
+
+impl AppState {
+    /// Check if `ip` has exceeded the rate limit.
+    /// Returns `true` if the request is allowed, `false` if it should be rejected.
+    fn check_rate_limit(&self, ip: &str) -> bool {
+        let now = Instant::now();
+        let mut entry = self.rate_limits.entry(ip.to_string()).or_insert_with(|| RateEntry {
+            count: 0,
+            window_start: now,
+        });
+
+        if now.duration_since(entry.window_start) >= RATE_WINDOW {
+            // Reset window
+            entry.count = 1;
+            entry.window_start = now;
+            true
+        } else if entry.count < RATE_LIMIT {
+            entry.count += 1;
+            true
+        } else {
+            false
+        }
+    }
 }
 
 #[tokio::main]
@@ -111,18 +156,20 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
         db: pool,
         scans: DashMap::new(),
         results: DashMap::new(),
+        rate_limits: DashMap::new(),
     });
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
+    // ── CORS ────────────────────────────────────────────────────────────────
+    // In production, restrict to the app's own origin via `ALLOWED_ORIGIN`.
+    // Falls back to allow-any for local development.
+    let cors = build_cors_layer();
 
     let app = Router::new()
         .route("/health", get(health_check))
         .route("/api/v1/scan", post(run_scan))
         .route("/api/v1/scan/workspace", post(run_workspace_scan))
         .route("/api/v1/scan/:id/events", get(subscribe_to_scan))
+        .route("/api/v1/scan/:id/results", get(get_scan_results))
         .route("/api/v1/history", get(get_history))
         .route("/api/v1/sync", post(trigger_sync))
         .route("/api/v1/ai/models", post(fetch_ai_models))
@@ -131,9 +178,47 @@ async fn start_server(pool: sqlx::PgPool) -> anyhow::Result<()> {
 
     let listener = tokio::net::TcpListener::bind("0.0.0.0:8080").await?;
     tracing::info!("Zenvra API listening on {}", listener.local_addr()?);
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .await?;
 
     Ok(())
+}
+
+/// Build the CORS layer, honouring the `ALLOWED_ORIGIN` environment variable.
+fn build_cors_layer() -> CorsLayer {
+    use axum::http::{HeaderValue, Method};
+    use tower_http::cors::Any;
+
+    let methods = [
+        Method::GET,
+        Method::POST,
+        Method::PUT,
+        Method::DELETE,
+        Method::OPTIONS,
+    ];
+
+    match std::env::var("ALLOWED_ORIGIN") {
+        Ok(origin) if !origin.is_empty() => {
+            tracing::info!("CORS: restricting to origin '{}'", origin);
+            let origin_value: HeaderValue = origin
+                .parse()
+                .expect("ALLOWED_ORIGIN must be a valid HTTP header value");
+            CorsLayer::new()
+                .allow_origin(AllowOrigin::exact(origin_value))
+                .allow_methods(methods)
+                .allow_headers(Any)
+        }
+        _ => {
+            tracing::warn!("CORS: ALLOWED_ORIGIN not set — allowing any origin (development mode)");
+            CorsLayer::new()
+                .allow_origin(Any)
+                .allow_methods(methods)
+                .allow_headers(Any)
+        }
+    }
 }
 
 async fn health_check() -> &'static str {
@@ -145,10 +230,44 @@ struct ScanResponse {
     scan_id: Uuid,
 }
 
+/// Parse raw request bytes into a `ScanRequest`, enforcing the body size cap.
+fn parse_scan_request(body: Bytes) -> Result<ScanRequest, (StatusCode, String)> {
+    if body.len() > MAX_SCAN_BODY_BYTES {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Request body exceeds the {} KiB limit",
+                MAX_SCAN_BODY_BYTES / 1024
+            ),
+        ));
+    }
+    serde_json::from_slice(&body).map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))
+}
+
+/// Extract a human-readable client IP from the connection info.
+fn client_ip(addr: Option<ConnectInfo<SocketAddr>>) -> String {
+    addr.map(|a| a.0.ip().to_string())
+        .unwrap_or_else(|| "unknown".to_string())
+}
+
 async fn run_scan(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<ScanRequest>,
+    addr: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
 ) -> Result<Json<ScanResponse>, (StatusCode, String)> {
+    // Rate limiting
+    let ip = client_ip(addr);
+    if !state.check_rate_limit(&ip) {
+        tracing::warn!("Rate limit exceeded for IP: {}", ip);
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded. Maximum 10 scans per minute per IP.".to_string(),
+        ));
+    }
+
+    // Parse and validate body size
+    let payload = parse_scan_request(body)?;
+
     let scan_id = Uuid::new_v4();
     tracing::info!(
         "Starting async scan for {}, ID: {}",
@@ -292,8 +411,32 @@ async fn run_scan(
 
 async fn run_workspace_scan(
     State(state): State<Arc<AppState>>,
-    Json(payload): Json<WorkspaceScanRequest>,
+    addr: Option<ConnectInfo<SocketAddr>>,
+    body: Bytes,
 ) -> Result<Json<ScanResponse>, (StatusCode, String)> {
+    // Rate limiting
+    let ip = client_ip(addr);
+    if !state.check_rate_limit(&ip) {
+        return Err((
+            StatusCode::TOO_MANY_REQUESTS,
+            "Rate limit exceeded. Maximum 10 scans per minute per IP.".to_string(),
+        ));
+    }
+
+    // Body size check for workspace (allow up to 5× single-file limit)
+    if body.len() > MAX_SCAN_BODY_BYTES * 5 {
+        return Err((
+            StatusCode::PAYLOAD_TOO_LARGE,
+            format!(
+                "Workspace request body exceeds the {} MiB limit",
+                (MAX_SCAN_BODY_BYTES * 5) / (1024 * 1024)
+            ),
+        ));
+    }
+
+    let payload: WorkspaceScanRequest =
+        serde_json::from_slice(&body).map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+
     let scan_id = Uuid::new_v4();
     tracing::info!(
         "Starting async workspace scan for {} files, ID: {}",
@@ -441,6 +584,46 @@ async fn subscribe_to_scan(
 }
 
 use std::convert::Infallible;
+
+/// Return persisted findings for a completed scan.
+async fn get_scan_results(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<Uuid>,
+) -> Result<axum::response::Response, (StatusCode, String)> {
+    let rows = sqlx::query(
+        "SELECT id, engine, cve_id, cwe_id, severity, title, description, \
+                vulnerable_code, fixed_code, line_start, line_end, file_path, created_at \
+         FROM scan_results WHERE scan_id = $1 ORDER BY created_at ASC",
+    )
+    .bind(id)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        use sqlx::Row;
+        results.push(serde_json::json!({
+            "id":              row.get::<uuid::Uuid, _>("id"),
+            "engine":          row.get::<String, _>("engine"),
+            "cve_id":          row.get::<Option<String>, _>("cve_id"),
+            "cwe_id":          row.get::<Option<String>, _>("cwe_id"),
+            "severity":        row.get::<String, _>("severity"),
+            "title":           row.get::<String, _>("title"),
+            "description":     row.get::<Option<String>, _>("description"),
+            "explanation":     "",   // AI explanation not stored; shown during live stream
+            "vulnerable_code": row.get::<String, _>("vulnerable_code"),
+            "fixed_code":      row.get::<Option<String>, _>("fixed_code").unwrap_or_default(),
+            "line_start":      row.get::<i32, _>("line_start"),
+            "line_end":        row.get::<i32, _>("line_end"),
+            "file_path":       row.get::<Option<String>, _>("file_path"),
+            "detected_at":     row.get::<chrono::DateTime<chrono::Utc>, _>("created_at"),
+        }));
+    }
+
+    use axum::response::IntoResponse;
+    Ok(Json(serde_json::Value::Array(results)).into_response())
+}
 
 async fn get_history(
     State(state): State<Arc<AppState>>,

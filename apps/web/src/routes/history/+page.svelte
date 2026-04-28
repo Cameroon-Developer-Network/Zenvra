@@ -130,9 +130,9 @@
                 <p class="text-[10px] font-bold text-zinc-500 uppercase tracking-widest">Findings</p>
               </div>
 
-              <button class="w-10 h-10 rounded-xl glass border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-white/5 transition-all">
+              <a href="/history/{scan.id}" class="w-10 h-10 rounded-xl glass border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-white hover:bg-white/5 transition-all">
                 <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
-              </button>
+              </a>
             </div>
           </div>
           

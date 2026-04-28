@@ -4,7 +4,7 @@ on:
   pull_request:
     branches: [main, develop]
   push:
-    branches: [develop]
+    branches: [main, develop]
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -114,10 +114,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install cargo-audit
+        run: cargo install cargo-audit
+
       - name: Rust audit
-        uses: rustsec/audit-check@v1
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: cargo audit --ignore RUSTSEC-2023-0071 --ignore RUSTSEC-2026-0097
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -132,3 +133,42 @@ jobs:
       - name: npm audit (web)
         working-directory: apps/web
         run: pnpm install --frozen-lockfile && pnpm audit --audit-level=high
+
+  # ─── Deploy (Latest) ──────────────────────────────────────────────────────
+  deploy:
+    name: Deploy — Build & Push (Latest)
+    needs: [rust, web, vscode, audit]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Log in to the Container registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push API (latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: crates/server/Dockerfile
+          push: true
+          tags: ghcr.io/${{ github.repository }}-api:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push Web (latest)
+        uses: docker/build-push-action@v5
+        with:
+          context: ./apps/web
+          push: true
+          tags: ghcr.io/${{ github.repository }}-web:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

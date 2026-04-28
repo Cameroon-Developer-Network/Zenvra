@@ -12,9 +12,11 @@ node_modules
 .next
 out
 dist
+build
 
 # VS Code extension output
 extensions/vscode/out
+extensions/vscode/*.vsix
 
 # OS
 .DS_Store
@@ -32,3 +34,6 @@ coverage
 .idea
 *.swp
 *.swo
+*~
+*.tmp
+deploy-ghcr.sh

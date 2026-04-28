@@ -108,3 +108,17 @@ impl std::fmt::Display for Severity {
         }
     }
 }
+
+/// Events emitted during a scan run to provide real-time updates.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
+pub enum ScanEvent {
+    /// Scan progress update.
+    Progress { percentage: u8, message: String },
+    /// A new security finding has been detected and enriched.
+    Finding(Box<Finding>),
+    /// The scan has completed successfully.
+    Complete,
+    /// A critical error occurred during the scan.
+    Error(String),
+}

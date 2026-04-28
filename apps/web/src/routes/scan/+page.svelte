@@ -1,6 +1,7 @@
 <script lang="ts">
   import { type Finding } from "$lib/api";
   import { aiConfig } from "$lib/stores/aiConfig.svelte";
+  import { refreshScanCount } from "$lib/stores/usage";
 
   const LANGUAGES = [
     { value: "python",     label: "Python" },
@@ -20,6 +21,7 @@
   ];
 
   let selectedLanguage = $state("python");
+  let selectedMinSeverity = $state("info");
 
   let code = $state(`// Paste your code here to scan for vulnerabilities
 def get_user(user_id):
@@ -69,7 +71,8 @@ def get_user(user_id):
             api_key:  aiConfig.apiKey,
             model:    aiConfig.model,
             endpoint: aiConfig.endpoint || undefined,
-          } : undefined
+          } : undefined,
+          min_severity: selectedMinSeverity !== "info" ? selectedMinSeverity : undefined
         })
       });
 
@@ -95,6 +98,7 @@ def get_user(user_id):
             scanStatus = "Scan complete!";
             isScanning = false;
             eventSource.close();
+            refreshScanCount();
             break;
           case 'error':
             scanStatus = `Error: ${data.data}`;
@@ -106,8 +110,13 @@ def get_user(user_id):
 
       eventSource.onerror = () => {
         console.error("SSE connection failed");
-        isScanning = false;
-        eventSource.close();
+        scanStatus = "Connection lost. Reconnecting or finished.";
+        // We don't necessarily want to set isScanning to false here because SSE often reconnects automatically.
+        // But for Zenvra's simple model, we'll close it to avoid zombie states if the scan is actually done.
+        if (eventSource.readyState === EventSource.CLOSED || eventSource.readyState === EventSource.CONNECTING) {
+           isScanning = false;
+           eventSource.close();
+        }
       };
       
     } catch (error) {
@@ -144,7 +153,8 @@ def get_user(user_id):
             api_key:  aiConfig.apiKey,
             model:    aiConfig.model,
             endpoint: aiConfig.endpoint || undefined,
-          } : undefined
+          } : undefined,
+          min_severity: selectedMinSeverity !== "info" ? selectedMinSeverity : undefined
         })
       });
 
@@ -168,6 +178,7 @@ def get_user(user_id):
             scanStatus = "Scan complete!";
             isScanning = false;
             eventSource.close();
+            refreshScanCount();
             break;
           case 'error':
             scanStatus = `Error: ${data.data}`;
@@ -325,6 +336,21 @@ def get_user(user_id):
           </select>
         </div>
 
+        <!-- Severity Filter -->
+        <div class="flex items-center gap-3">
+          <label class="text-xs font-bold text-zinc-500 uppercase tracking-widest whitespace-nowrap">Min Severity</label>
+          <select
+            bind:value={selectedMinSeverity}
+            class="glass bg-zinc-900/80 px-3 py-2 rounded-xl border border-zinc-800 text-xs font-medium text-zinc-300 focus:ring-2 ring-brand-primary outline-none transition-all flex-1"
+          >
+            <option value="info">All (Info+)</option>
+            <option value="low">Low+</option>
+            <option value="medium">Medium+</option>
+            <option value="high">High+</option>
+            <option value="critical">Critical Only</option>
+          </select>
+        </div>
+
         <div class="flex-1 glass rounded-2xl overflow-hidden border-zinc-800 flex flex-col relative group">
           <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
             <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Input Code</span>
@@ -350,6 +376,20 @@ def get_user(user_id):
               Add Files
               <input type="file" multiple accept=".py,.js,.mjs,.cjs,.ts,.tsx,.rs,.go,.java,.cs,.cpp,.cc,.c,.rb,.php,.swift,.kt" onchange={handleFileUpload} class="hidden" />
             </label>
+          </div>
+
+          <div class="px-6 py-3 border-b border-border bg-zinc-900/50 flex items-center justify-between">
+            <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Min Severity Filter</span>
+            <select
+              bind:value={selectedMinSeverity}
+              class="bg-transparent text-xs font-bold text-zinc-400 outline-none cursor-pointer"
+            >
+              <option value="info" class="bg-zinc-900">All Levels</option>
+              <option value="low" class="bg-zinc-900">Low+</option>
+              <option value="medium" class="bg-zinc-900">Medium+</option>
+              <option value="high" class="bg-zinc-900">High+</option>
+              <option value="critical" class="bg-zinc-900">Critical</option>
+            </select>
           </div>
 
           <div class="flex-1 overflow-y-auto p-4 space-y-2 custom-scrollbar">
@@ -390,6 +430,12 @@ def get_user(user_id):
           <span class="text-xs font-bold text-zinc-500 uppercase tracking-widest">Findings ({findings.length})</span>
           {#if findings.length > 0}
              <button onclick={() => { findings = []; scanProgress = 0; scanStatus = "Ready to scan"; }} class="text-xs text-zinc-500 hover:text-zinc-300 transition-colors">Clear</button>
+          {/if}
+          {#if isScanning}
+            <div class="flex items-center gap-2">
+              <span class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span class="text-[10px] font-black text-emerald-500 uppercase tracking-tighter">Live Stream</span>
+            </div>
           {/if}
         </div>
         

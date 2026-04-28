@@ -153,28 +153,40 @@ zenvra/
 
 ### Setup
 
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/Cameroon-Developer-Network/zenvra.git
+   cd zenvra
+   ```
+
+2. **Start infrastructure (Postgres & Redis):**
+   ```bash
+   # Starts only the necessary databases
+   docker compose up -d postgres redis
+   ```
+
+3. **Configure environment:**
+   ```bash
+   cp .env.example .env
+   # Open .env and add your AI provider keys (Anthropic, OpenAI, or Google)
+   # The default DATABASE_URL in .env.example works with the docker setup
+   ```
+
+4. **Start the Backend API:**
+   ```bash
+   cargo run -p zenvra-server
+   ```
+
+5. **Start the Dashboard (Frontend):**
+   ```bash
+   cd apps/web
+   npm install  # or pnpm install
+   npm run dev
+   ```
+
+### Quick Scan via CLI
+
 ```bash
-# Clone
-git clone https://github.com/Cameroon-Developer-Network/zenvra.git
-cd zenvra
-
-# Start infrastructure
-docker compose up -d
-
-# Configure environment
-cp .env.example .env
-# Add your ANTHROPIC_API_KEY and DATABASE_URL
-
-# Build Rust workspace
-cargo build
-
-# Run all tests
-cargo test --all
-
-# Frontend
-cd apps/web && pnpm install && pnpm dev
-
-# Try the CLI
 cargo run -p zenvra-cli -- scan ./path/to/code
 ```
 

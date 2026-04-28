@@ -90,7 +90,8 @@ h = hashlib.md5(password).hexdigest()
     assert!(
         findings
             .iter()
-            .any(|f| f.title.to_lowercase().contains("md5") || f.title.to_lowercase().contains("hash")),
+            .any(|f| f.title.to_lowercase().contains("md5")
+                || f.title.to_lowercase().contains("hash")),
         "Expected a weak-hashing finding"
     );
 }
@@ -143,10 +144,7 @@ async fn secrets_detects_github_token() {
         .await
         .expect("scan should succeed");
 
-    assert!(
-        !findings.is_empty(),
-        "Expected a GitHub token finding"
-    );
+    assert!(!findings.is_empty(), "Expected a GitHub token finding");
 }
 
 #[tokio::test]
@@ -162,10 +160,7 @@ MIIEpAIBAAKCAQEA0Z3VR...
         .await
         .expect("scan should succeed");
 
-    assert!(
-        !findings.is_empty(),
-        "Expected a private key finding"
-    );
+    assert!(!findings.is_empty(), "Expected a private key finding");
     assert_eq!(findings[0].severity, Severity::Critical);
 }
 
@@ -252,7 +247,10 @@ async fn multi_engine_finds_multiple_issues() {
     let severities: Vec<&Severity> = findings.iter().map(|f| &f.severity).collect();
     let mut sorted = severities.clone();
     sorted.sort_by(|a, b| b.cmp(a));
-    assert_eq!(severities, sorted, "Findings should be sorted by severity descending");
+    assert_eq!(
+        severities, sorted,
+        "Findings should be sorted by severity descending"
+    );
 }
 
 // ─────────────────────────── SCA Engine (unit) ────────────────────────────────

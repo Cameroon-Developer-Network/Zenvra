@@ -16,6 +16,7 @@ export interface ScanRequest {
   language?: string;
   engines?: string[];
   ai_config?: AiConfig;
+  min_severity?: 'critical' | 'high' | 'medium' | 'low' | 'info';
 }
 
 export interface Finding {

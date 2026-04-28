@@ -30,13 +30,17 @@ const MAX_SCAN_BODY_BYTES: usize = 512 * 1024;
 /// Rate-limit window duration.
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 /// Maximum scan requests per IP per window.
-const RATE_LIMIT: u32 = 10;
+const RATE_LIMIT: u32 = 100;
 /// How long completed scan results are cached for late SSE subscribers (seconds).
 const RESULTS_CACHE_TTL_SECS: u64 = 300;
 
 /// Return `None` when `s` is empty, otherwise wrap it in `Some`.
 fn none_if_empty(s: &str) -> Option<&str> {
-    if s.is_empty() { None } else { Some(s) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s)
+    }
 }
 
 #[derive(Parser)]
@@ -61,6 +65,7 @@ struct ScanRequest {
     language: String,
     engines: Vec<String>,
     ai_config: Option<zenvra_scanner::ai::AiConfig>,
+    min_severity: Option<zenvra_scanner::Severity>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,6 +73,7 @@ struct WorkspaceScanRequest {
     files: Vec<WorkspaceFile>,
     engines: Vec<String>,
     ai_config: Option<zenvra_scanner::ai::AiConfig>,
+    min_severity: Option<zenvra_scanner::Severity>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -98,10 +104,13 @@ impl AppState {
     /// Returns `true` if the request is allowed, `false` if it should be rejected.
     fn check_rate_limit(&self, ip: &str) -> bool {
         let now = Instant::now();
-        let mut entry = self.rate_limits.entry(ip.to_string()).or_insert_with(|| RateEntry {
-            count: 0,
-            window_start: now,
-        });
+        let mut entry = self
+            .rate_limits
+            .entry(ip.to_string())
+            .or_insert_with(|| RateEntry {
+                count: 0,
+                window_start: now,
+            });
 
         if now.duration_since(entry.window_start) >= RATE_WINDOW {
             // Reset window
@@ -284,6 +293,7 @@ async fn run_scan(
 
     let (tx, _rx) = broadcast::channel(100);
     state.scans.insert(scan_id, tx.clone());
+    state.results.insert(scan_id, Vec::new());
 
     let engines = payload
         .engines
@@ -308,7 +318,23 @@ async fn run_scan(
     let state_task = Arc::clone(&state);
     let payload_lang = payload.language.clone();
 
-    // Spawn scan task
+    // ─── Phase 1: Initialize Scan Record ─────────────────────────────────────
+    // We MUST insert the scan record before any findings to avoid FK violations.
+    if let Err(e) = sqlx::query(
+        "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
+         VALUES ($1, $2, $3, 0, $4)"
+    )
+    .bind(scan_id)
+    .bind(&payload_lang)
+    .bind("Manual Scan")
+    .bind(serde_json::to_value(std::collections::HashMap::<String, i32>::new()).unwrap())
+    .execute(&state.db)
+    .await {
+        tracing::error!("Failed to initialize scan record {}: {}", scan_id, e);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database initialization error".to_string()));
+    }
+
+    // ─── Phase 2: Start Background Scan ──────────────────────────────────────
     tokio::spawn(async move {
         let (scan_tx, mut scan_rx) = tokio::sync::mpsc::unbounded_channel();
         let config_task = config.clone();
@@ -321,36 +347,22 @@ async fn run_scan(
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
-        let mut all_events: Vec<ScanEvent> = Vec::new();
+        let min_sev = payload.min_severity.unwrap_or(zenvra_scanner::Severity::Info);
 
         while let Some(event) = scan_rx.recv().await {
-            // Cache event for late subscribers
-            all_events.push(event.clone());
-
-            // Broadcast to any connected SSE subscribers
-            if let Err(e) = tx.send(event.clone()) {
-                tracing::debug!("SSE broadcast error (no active subscribers?): {}", e);
+            // Apply severity filtering and caching
+            if let ScanEvent::Finding(ref f) = event {
+                if f.severity < min_sev { continue; }
             }
+            if let Some(mut cached) = state_task.results.get_mut(&scan_id) {
+                cached.push(event.clone());
+            }
+            let _ = tx.send(event.clone());
 
-            // Process specific events for DB persistence
             match event {
-                ScanEvent::Finding(mut finding) => {
+                ScanEvent::Finding(finding) => {
                     let sev_str = finding.severity.to_string().to_lowercase();
                     *severity_counts.entry(sev_str).or_insert(0) += 1;
-
-                    // Enrich from local DB
-                    if let Some(cve_id) = &finding.cve_id {
-                        if let Ok(Some(row)) = sqlx::query(
-                            "SELECT title, description FROM vulnerabilities WHERE cve_id = $1",
-                        )
-                        .bind(cve_id)
-                        .fetch_optional(&state_task.db)
-                        .await
-                        {
-                            use sqlx::Row;
-                            finding.title = row.get("title");
-                        }
-                    }
 
                     // Persist individual finding
                     if let Err(e) = sqlx::query(
@@ -374,26 +386,17 @@ async fn run_scan(
                     .await {
                         tracing::error!("Failed to persist finding for scan {}: {}", scan_id, e);
                     }
-
                     findings.push(*finding);
                 }
                 ScanEvent::Complete => {
-                    // Finalize scan record
-                    if let Err(e) = sqlx::query(
-                        "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
-                         VALUES ($1, $2, $3, $4, $5) 
-                         ON CONFLICT (id) DO UPDATE SET findings_count = $4, severity_counts = $5"
-                    )
-                    .bind(scan_id)
-                    .bind(payload_lang)
-                    .bind("Manual Scan")
-                    .bind(findings.len() as i32)
-                    .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
-                    .execute(&state_task.db)
-                    .await {
-                        tracing::error!("Failed to finalize scan {}: {}", scan_id, e);
-                    }
-
+                    // Update scan record with final counts
+                    let _ = sqlx::query("UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3")
+                        .bind(findings.len() as i32)
+                        .bind(serde_json::to_value(&severity_counts).unwrap())
+                        .bind(scan_id)
+                        .execute(&state_task.db)
+                        .await;
+                    
                     tracing::info!("Scan completed and persisted: {}", scan_id);
                     break;
                 }
@@ -405,9 +408,8 @@ async fn run_scan(
             }
         }
 
-        // Move results to cache so late SSE subscribers can replay them
+        // Mark as finished by removing from live scans
         state_task.scans.remove(&scan_id);
-        state_task.results.insert(scan_id, all_events);
 
         // Clean up results cache after TTL
         tokio::time::sleep(tokio::time::Duration::from_secs(RESULTS_CACHE_TTL_SECS)).await;
@@ -442,8 +444,8 @@ async fn run_workspace_scan(
         ));
     }
 
-    let payload: WorkspaceScanRequest =
-        serde_json::from_slice(&body).map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
+    let payload: WorkspaceScanRequest = serde_json::from_slice(&body)
+        .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
 
     let scan_id = Uuid::new_v4();
     tracing::info!(
@@ -454,6 +456,7 @@ async fn run_workspace_scan(
 
     let (tx, _rx) = broadcast::channel(100);
     state.scans.insert(scan_id, tx.clone());
+    state.results.insert(scan_id, Vec::new());
 
     let engines: Vec<zenvra_scanner::Engine> = payload
         .engines
@@ -483,76 +486,75 @@ async fn run_workspace_scan(
 
     let tx_task = tx.clone();
     let state_task = state.clone();
+    let payload_workspace_name = "Workspace Scan".to_string();
 
-    // Spawn scan task
+    // ─── Phase 1: Initialize Workspace Record ────────────────────────────────
+    if let Err(e) = sqlx::query(
+        "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
+         VALUES ($1, $2, $3, 0, $4)"
+    )
+    .bind(scan_id).bind("Workspace").bind(&payload_workspace_name)
+    .bind(serde_json::to_value(std::collections::HashMap::<String, i32>::new()).unwrap())
+    .execute(&state.db).await {
+        tracing::error!("Failed to initialize workspace record {}: {}", scan_id, e);
+        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database initialization error".to_string()));
+    }
+
+    // ─── Phase 2: Start Background Scan ──────────────────────────────────────
     tokio::spawn(async move {
         let (scan_tx, mut scan_rx) = tokio::sync::mpsc::unbounded_channel();
         let config_task = config.clone();
 
         tokio::spawn(async move {
             if let Err(e) = zenvra_scanner::scan_workspace_stream(config_task, scan_tx).await {
-                tracing::error!("Scanner stream error: {}", e);
+                tracing::error!("Workspace scanner stream error: {}", e);
             }
         });
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
-        let mut all_events: Vec<ScanEvent> = Vec::new();
+        let min_sev = payload.min_severity.unwrap_or(zenvra_scanner::Severity::Info);
 
         while let Some(event) = scan_rx.recv().await {
-            all_events.push(event.clone());
+            if let ScanEvent::Finding(ref f) = event {
+                if f.severity < min_sev { continue; }
+            }
+            if let Some(mut cached) = state_task.results.get_mut(&scan_id) {
+                cached.push(event.clone());
+            }
             let _ = tx_task.send(event.clone());
 
-            if let ScanEvent::Finding(finding) = event {
-                let sev_str = finding.severity.to_string().to_lowercase();
-                *severity_counts.entry(sev_str).or_insert(0) += 1;
+            match event {
+                ScanEvent::Finding(finding) => {
+                    let sev_str = finding.severity.to_string().to_lowercase();
+                    *severity_counts.entry(sev_str).or_insert(0) += 1;
 
-                // Persist individual finding
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, explanation, vulnerable_code, fixed_code, line_start, line_end, file_path)
-                     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
-                )
-                .bind(scan_id)
-                .bind(format!("{:?}", finding.engine))
-                .bind(&finding.cve_id)
-                .bind(&finding.cwe_id)
-                .bind(finding.severity.to_string())
-                .bind(&finding.title)
-                .bind(&finding.description)
-                .bind(none_if_empty(&finding.explanation))
-                .bind(&finding.vulnerable_code)
-                .bind(none_if_empty(&finding.fixed_code))
-                .bind(finding.line_start as i32)
-                .bind(finding.line_end as i32)
-                .bind(&finding.file_path)
-                .execute(&state_task.db)
-                .await {
-                    tracing::error!("Failed to persist workspace finding: {}", e);
+                    // Persist individual finding
+                    let _ = sqlx::query(
+                        "INSERT INTO scan_results (scan_id, engine, cve_id, cwe_id, severity, title, description, explanation, vulnerable_code, fixed_code, line_start, line_end, file_path)
+                         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)"
+                    )
+                    .bind(scan_id).bind(format!("{:?}", finding.engine)).bind(&finding.cve_id).bind(&finding.cwe_id)
+                    .bind(finding.severity.to_string()).bind(&finding.title).bind(&finding.description)
+                    .bind(none_if_empty(&finding.explanation)).bind(&finding.vulnerable_code)
+                    .bind(none_if_empty(&finding.fixed_code)).bind(finding.line_start as i32)
+                    .bind(finding.line_end as i32).bind(&finding.file_path)
+                    .execute(&state_task.db).await;
+                    findings.push(*finding);
                 }
-                findings.push(*finding);
-            } else if matches!(event, ScanEvent::Complete) {
-                // Finalize scan record
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
-                     VALUES ($1, $2, $3, $4, $5)"
-                )
-                .bind(scan_id)
-                .bind("Workspace") // Multi-file
-                .bind("Workspace Scan")
-                .bind(findings.len() as i32)
-                .bind(serde_json::to_value(&severity_counts).unwrap_or(serde_json::Value::Object(Default::default())))
-                .execute(&state_task.db)
-                .await {
-                    tracing::error!("Failed to finalize workspace scan: {}", e);
+                ScanEvent::Complete => {
+                    let _ = sqlx::query("UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3")
+                        .bind(findings.len() as i32)
+                        .bind(serde_json::to_value(&severity_counts).unwrap())
+                        .bind(scan_id)
+                        .execute(&state_task.db)
+                        .await;
+                    break;
                 }
-                break;
+                _ => {}
             }
         }
-
-        // Cache events for late SSE subscribers (5-minute TTL)
         state_task.scans.remove(&scan_id);
-        state_task.results.insert(scan_id, all_events);
-
         tokio::time::sleep(tokio::time::Duration::from_secs(RESULTS_CACHE_TTL_SECS)).await;
         state_task.results.remove(&scan_id);
     });
@@ -568,34 +570,50 @@ async fn subscribe_to_scan(
 
     type BoxedStream = std::pin::Pin<Box<dyn Stream<Item = Result<Event, Infallible>> + Send>>;
 
-    // Case 1: Scan already completed — replay cached events immediately
-    let stream: BoxedStream = if let Some(cached) = state.results.get(&id) {
-        let events: Vec<ScanEvent> = cached.clone();
-        Box::pin(
-            stream::iter(events).map(move |event| -> Result<Event, Infallible> {
-                Ok(Event::default()
-                    .json_data(&event)
-                    .unwrap_or_else(|_| Event::default()))
-            }),
-        )
-    } else {
-        // Case 2: Scan is still in progress — subscribe to live broadcast
-        let tx = state
-            .scans
-            .get(&id)
-            .ok_or((StatusCode::NOT_FOUND, "Scan not found".to_string()))?
-            .clone();
+    // Use a multi-stage stream: catch up from cache, then switch to live.
+    // We subscribe first to ensure we don't miss anything that happens during the catch-up.
+    let rx = state
+        .scans
+        .get(&id)
+        .map(|tx| tx.subscribe());
 
-        let rx = tx.subscribe();
-        Box::pin(
-            tokio_stream::wrappers::BroadcastStream::new(rx)
-                .filter_map(|msg: Result<ScanEvent, _>| msg.ok())
-                .map(|event: ScanEvent| -> Result<Event, Infallible> {
-                    Ok(Event::default()
-                        .json_data(event)
-                        .unwrap_or_else(|_| Event::default()))
-                }),
-        )
+    let cached_events = state.results.get(&id).map(|c| c.clone()).unwrap_or_default();
+    let num_cached = cached_events.len();
+
+    let past_stream = stream::iter(cached_events).map(|event| -> Result<Event, Infallible> {
+        Ok(Event::default()
+            .json_data(&event)
+            .unwrap_or_else(|_| Event::default()))
+    });
+
+    let stream: BoxedStream = if let Some(rx) = rx {
+        // Scan is ongoing
+        let mut seen_count = 0;
+        let live_stream = tokio_stream::wrappers::BroadcastStream::new(rx)
+            .filter_map(|msg| msg.ok())
+            .filter(move |_| {
+                // Skip the first N events that were already in our cache clone
+                // This is a simple heuristic; a real implementation would use event IDs.
+                if seen_count < num_cached {
+                    seen_count += 1;
+                    false
+                } else {
+                    true
+                }
+            })
+            .map(|event| -> Result<Event, Infallible> {
+                Ok(Event::default()
+                    .json_data(event)
+                    .unwrap_or_else(|_| Event::default()))
+            });
+
+        Box::pin(past_stream.chain(live_stream))
+    } else {
+        // Scan is already complete (or doesn't exist)
+        if num_cached == 0 {
+            return Err((StatusCode::NOT_FOUND, "Scan not found".to_string()));
+        }
+        Box::pin(past_stream)
     };
 
     Ok(Sse::new(stream).keep_alive(axum::response::sse::KeepAlive::default()))
@@ -650,6 +668,8 @@ async fn get_history(
         .fetch_all(&state.db)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    tracing::info!("Fetched {} scans from history", scans.len());
 
     let mut results = Vec::new();
     for row in scans {

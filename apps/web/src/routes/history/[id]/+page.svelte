@@ -31,7 +31,9 @@
 
   onMount(async () => {
     try {
-      findings = await getScanResults(scanId);
+      if (scanId) {
+        findings = await getScanResults(scanId);
+      }
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : String(err);
       error = msg || "Failed to load scan results.";

@@ -31,6 +31,13 @@ const MAX_SCAN_BODY_BYTES: usize = 512 * 1024;
 const RATE_WINDOW: Duration = Duration::from_secs(60);
 /// Maximum scan requests per IP per window.
 const RATE_LIMIT: u32 = 10;
+/// How long completed scan results are cached for late SSE subscribers (seconds).
+const RESULTS_CACHE_TTL_SECS: u64 = 300;
+
+/// Return `None` when `s` is empty, otherwise wrap it in `Some`.
+fn none_if_empty(s: &str) -> Option<&str> {
+    if s.is_empty() { None } else { Some(s) }
+}
 
 #[derive(Parser)]
 #[command(name = "zenvra-server")]
@@ -357,9 +364,9 @@ async fn run_scan(
                     .bind(finding.severity.to_string())
                     .bind(&finding.title)
                     .bind(&finding.description)
-                    .bind(if finding.explanation.is_empty() { None } else { Some(&finding.explanation) })
+                    .bind(none_if_empty(&finding.explanation))
                     .bind(&finding.vulnerable_code)
-                    .bind(if finding.fixed_code.is_empty() { None } else { Some(&finding.fixed_code) })
+                    .bind(none_if_empty(&finding.fixed_code))
                     .bind(finding.line_start as i32)
                     .bind(finding.line_end as i32)
                     .bind(&finding.file_path)
@@ -402,8 +409,8 @@ async fn run_scan(
         state_task.scans.remove(&scan_id);
         state_task.results.insert(scan_id, all_events);
 
-        // Clean up results cache after 5 minutes
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        // Clean up results cache after TTL
+        tokio::time::sleep(tokio::time::Duration::from_secs(RESULTS_CACHE_TTL_SECS)).await;
         state_task.results.remove(&scan_id);
     });
 
@@ -512,9 +519,9 @@ async fn run_workspace_scan(
                 .bind(finding.severity.to_string())
                 .bind(&finding.title)
                 .bind(&finding.description)
-                .bind(if finding.explanation.is_empty() { None } else { Some(&finding.explanation) })
+                .bind(none_if_empty(&finding.explanation))
                 .bind(&finding.vulnerable_code)
-                .bind(if finding.fixed_code.is_empty() { None } else { Some(&finding.fixed_code) })
+                .bind(none_if_empty(&finding.fixed_code))
                 .bind(finding.line_start as i32)
                 .bind(finding.line_end as i32)
                 .bind(&finding.file_path)
@@ -546,7 +553,7 @@ async fn run_workspace_scan(
         state_task.scans.remove(&scan_id);
         state_task.results.insert(scan_id, all_events);
 
-        tokio::time::sleep(tokio::time::Duration::from_secs(300)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(RESULTS_CACHE_TTL_SECS)).await;
         state_task.results.remove(&scan_id);
     });
 

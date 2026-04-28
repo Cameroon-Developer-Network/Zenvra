@@ -204,7 +204,11 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
                 // Manual filtering for rules that were simplified to avoid look-ahead panics
                 if rule.name == "Unauthenticated Route Handler" {
                     let l = line.to_lowercase();
-                    if l.contains("auth") || l.contains("depends") || l.contains("token") || l.contains("user") {
+                    if l.contains("auth")
+                        || l.contains("depends")
+                        || l.contains("token")
+                        || l.contains("user")
+                    {
                         continue;
                     }
                 }

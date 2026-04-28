@@ -322,16 +322,20 @@ async fn run_scan(
     // We MUST insert the scan record before any findings to avoid FK violations.
     if let Err(e) = sqlx::query(
         "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
-         VALUES ($1, $2, $3, 0, $4)"
+         VALUES ($1, $2, $3, 0, $4)",
     )
     .bind(scan_id)
     .bind(&payload_lang)
     .bind("Manual Scan")
     .bind(serde_json::to_value(std::collections::HashMap::<String, i32>::new()).unwrap())
     .execute(&state.db)
-    .await {
+    .await
+    {
         tracing::error!("Failed to initialize scan record {}: {}", scan_id, e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database initialization error".to_string()));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database initialization error".to_string(),
+        ));
     }
 
     // ─── Phase 2: Start Background Scan ──────────────────────────────────────
@@ -347,12 +351,16 @@ async fn run_scan(
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
-        let min_sev = payload.min_severity.unwrap_or(zenvra_scanner::Severity::Info);
+        let min_sev = payload
+            .min_severity
+            .unwrap_or(zenvra_scanner::Severity::Info);
 
         while let Some(event) = scan_rx.recv().await {
             // Apply severity filtering and caching
             if let ScanEvent::Finding(ref f) = event {
-                if f.severity < min_sev { continue; }
+                if f.severity < min_sev {
+                    continue;
+                }
             }
             if let Some(mut cached) = state_task.results.get_mut(&scan_id) {
                 cached.push(event.clone());
@@ -390,13 +398,15 @@ async fn run_scan(
                 }
                 ScanEvent::Complete => {
                     // Update scan record with final counts
-                    let _ = sqlx::query("UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3")
-                        .bind(findings.len() as i32)
-                        .bind(serde_json::to_value(&severity_counts).unwrap())
-                        .bind(scan_id)
-                        .execute(&state_task.db)
-                        .await;
-                    
+                    let _ = sqlx::query(
+                        "UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3",
+                    )
+                    .bind(findings.len() as i32)
+                    .bind(serde_json::to_value(&severity_counts).unwrap())
+                    .bind(scan_id)
+                    .execute(&state_task.db)
+                    .await;
+
                     tracing::info!("Scan completed and persisted: {}", scan_id);
                     break;
                 }
@@ -491,13 +501,20 @@ async fn run_workspace_scan(
     // ─── Phase 1: Initialize Workspace Record ────────────────────────────────
     if let Err(e) = sqlx::query(
         "INSERT INTO scans (id, language, target_name, findings_count, severity_counts) 
-         VALUES ($1, $2, $3, 0, $4)"
+         VALUES ($1, $2, $3, 0, $4)",
     )
-    .bind(scan_id).bind("Workspace").bind(&payload_workspace_name)
+    .bind(scan_id)
+    .bind("Workspace")
+    .bind(&payload_workspace_name)
     .bind(serde_json::to_value(std::collections::HashMap::<String, i32>::new()).unwrap())
-    .execute(&state.db).await {
+    .execute(&state.db)
+    .await
+    {
         tracing::error!("Failed to initialize workspace record {}: {}", scan_id, e);
-        return Err((StatusCode::INTERNAL_SERVER_ERROR, "Database initialization error".to_string()));
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Database initialization error".to_string(),
+        ));
     }
 
     // ─── Phase 2: Start Background Scan ──────────────────────────────────────
@@ -513,11 +530,15 @@ async fn run_workspace_scan(
 
         let mut findings = Vec::new();
         let mut severity_counts = std::collections::HashMap::new();
-        let min_sev = payload.min_severity.unwrap_or(zenvra_scanner::Severity::Info);
+        let min_sev = payload
+            .min_severity
+            .unwrap_or(zenvra_scanner::Severity::Info);
 
         while let Some(event) = scan_rx.recv().await {
             if let ScanEvent::Finding(ref f) = event {
-                if f.severity < min_sev { continue; }
+                if f.severity < min_sev {
+                    continue;
+                }
             }
             if let Some(mut cached) = state_task.results.get_mut(&scan_id) {
                 cached.push(event.clone());
@@ -543,12 +564,14 @@ async fn run_workspace_scan(
                     findings.push(*finding);
                 }
                 ScanEvent::Complete => {
-                    let _ = sqlx::query("UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3")
-                        .bind(findings.len() as i32)
-                        .bind(serde_json::to_value(&severity_counts).unwrap())
-                        .bind(scan_id)
-                        .execute(&state_task.db)
-                        .await;
+                    let _ = sqlx::query(
+                        "UPDATE scans SET findings_count = $1, severity_counts = $2 WHERE id = $3",
+                    )
+                    .bind(findings.len() as i32)
+                    .bind(serde_json::to_value(&severity_counts).unwrap())
+                    .bind(scan_id)
+                    .execute(&state_task.db)
+                    .await;
                     break;
                 }
                 _ => {}
@@ -572,12 +595,13 @@ async fn subscribe_to_scan(
 
     // Use a multi-stage stream: catch up from cache, then switch to live.
     // We subscribe first to ensure we don't miss anything that happens during the catch-up.
-    let rx = state
-        .scans
-        .get(&id)
-        .map(|tx| tx.subscribe());
+    let rx = state.scans.get(&id).map(|tx| tx.subscribe());
 
-    let cached_events = state.results.get(&id).map(|c| c.clone()).unwrap_or_default();
+    let cached_events = state
+        .results
+        .get(&id)
+        .map(|c| c.clone())
+        .unwrap_or_default();
     let num_cached = cached_events.len();
 
     let past_stream = stream::iter(cached_events).map(|event| -> Result<Event, Infallible> {

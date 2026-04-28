@@ -1,7 +1,15 @@
 <script lang="ts">
   import "../app.css";
   import { page } from "$app/state";
+  import { scanCount, refreshScanCount } from "$lib/stores/usage";
+  import { onMount } from "svelte";
   let { children } = $props();
+
+  const maxScans = 10;
+
+  onMount(async () => {
+    await refreshScanCount();
+  });
 
   const navItems = [
     { name: "Dashboard", href: "/", icon: "layout-grid", disabled: false },
@@ -56,9 +64,9 @@
         <p class="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-2">Usage Plan</p>
         <p class="text-sm font-medium mb-1">Free Tier</p>
         <div class="w-full bg-zinc-800 h-1.5 rounded-full overflow-hidden mt-2">
-          <div class="bg-brand-primary w-2/5 h-full rounded-full shadow-[0_0_8px_rgba(236,72,153,0.5)]"></div>
+          <div class="bg-brand-primary h-full rounded-full shadow-[0_0_8px_rgba(236,72,153,0.5)]" style="width: {($scanCount / maxScans) * 100}%"></div>
         </div>
-        <p class="text-[10px] text-zinc-500 mt-2">4/10 scans remaining</p>
+        <p class="text-[10px] text-zinc-500 mt-2">{maxScans - $scanCount}/{maxScans} scans remaining</p>
       </div>
     </div>
   </aside>

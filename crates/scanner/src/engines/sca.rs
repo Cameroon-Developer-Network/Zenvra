@@ -5,7 +5,10 @@
 //! for known CVEs.  Returns `RawFinding`s with `Engine::Sca` and real CVE IDs
 //! wherever available.
 
-use crate::{finding::{RawFinding, Severity}, Engine, ScanConfig};
+use crate::{
+    finding::{RawFinding, Severity},
+    Engine, ScanConfig,
+};
 use anyhow::Result;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
@@ -81,7 +84,8 @@ fn parse_dependencies(config: &ScanConfig) -> Vec<Dependency> {
         parse_requirements_txt(code)
     } else if lower.ends_with("go.sum") {
         parse_go_sum(code)
-    } else if lower.ends_with("pom.xml") || (lower.ends_with(".xml") && code.contains("<groupId>")) {
+    } else if lower.ends_with("pom.xml") || (lower.ends_with(".xml") && code.contains("<groupId>"))
+    {
         parse_pom_xml(code)
     } else {
         // Try heuristic detection
@@ -109,7 +113,11 @@ fn parse_cargo_lock(content: &str) -> Vec<Dependency> {
         if line == "[[package]]" {
             // Flush previous
             if let (Some(name), Some(version)) = (current_name.take(), current_version.take()) {
-                deps.push(Dependency { name, version, ecosystem: "crates.io".to_string() });
+                deps.push(Dependency {
+                    name,
+                    version,
+                    ecosystem: "crates.io".to_string(),
+                });
             }
         } else if let Some(rest) = line.strip_prefix("name = ") {
             current_name = Some(rest.trim_matches('"').to_string());
@@ -119,7 +127,11 @@ fn parse_cargo_lock(content: &str) -> Vec<Dependency> {
     }
     // Flush last
     if let (Some(name), Some(version)) = (current_name, current_version) {
-        deps.push(Dependency { name, version, ecosystem: "crates.io".to_string() });
+        deps.push(Dependency {
+            name,
+            version,
+            ecosystem: "crates.io".to_string(),
+        });
     }
     deps
 }
@@ -195,8 +207,15 @@ fn parse_pom_xml(content: &str) -> Vec<Dependency> {
     };
     for cap in dep_re.captures_iter(content) {
         let name = cap[1].trim().to_string();
-        let version = cap.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_else(|| "unknown".to_string());
-        deps.push(Dependency { name, version, ecosystem: "Maven".to_string() });
+        let version = cap
+            .get(2)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        deps.push(Dependency {
+            name,
+            version,
+            ecosystem: "Maven".to_string(),
+        });
     }
     deps
 }
@@ -263,11 +282,7 @@ async fn query_osv(deps: &[Dependency]) -> Result<Vec<(Dependency, Vec<OsvVuln>)
 
         let body = OsvBatchRequest { queries };
 
-        let response = client
-            .post(OSV_BATCH_URL)
-            .json(&body)
-            .send()
-            .await;
+        let response = client.post(OSV_BATCH_URL).json(&body).send().await;
 
         let response = match response {
             Ok(r) => r,
@@ -348,7 +363,10 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
                 cve_id,
                 cwe_id: None,
                 severity,
-                title: format!("Vulnerable dependency: {} v{} — {}", dep.name, dep.version, title),
+                title: format!(
+                    "Vulnerable dependency: {} v{} — {}",
+                    dep.name, dep.version, title
+                ),
                 vulnerable_code: format!("{}@{} ({})", dep.name, dep.version, dep.ecosystem),
                 description: Some(format!(
                     "{} (ID: {})",

@@ -333,7 +333,11 @@ async fn fetch_osv_vulns(
 
 /// Convert a CVSS score string like "7.5" to a severity label.
 fn cvss_score_to_severity(score: &str) -> &'static str {
-    let n: f32 = score.split('/').next().and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    let n: f32 = score
+        .split('/')
+        .next()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5.0);
     if n >= 9.0 {
         "critical"
     } else if n >= 7.0 {

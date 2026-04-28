@@ -112,8 +112,8 @@ fn build_rules() -> Vec<AiCodeRule> {
         AiCodeRule {
             name: "Unauthenticated Route Handler",
             regex: NO_AUTH_ROUTE_REGEX.get_or_init(|| {
-                Regex::new(r"(?i)@(app|router)\.(delete|put|patch)\s*\([^)]+\)\s*\nasync\s+def\s+[a-z_]+\((?!.*\bauth\b|.*\bdepends\b|.*\btoken\b|.*\buser\b)")
-                    .unwrap()
+                // Simplified: detect the decorator. Manual filtering below.
+                Regex::new(r"(?i)@(app|router)\.(delete|put|patch)\s*\(").unwrap()
             })
             .clone(),
             severity: Severity::Medium,
@@ -151,8 +151,8 @@ fn build_rules() -> Vec<AiCodeRule> {
         AiCodeRule {
             name: "Plain HTTP Endpoint (No TLS)",
             regex: PLAIN_HTTP_REGEX.get_or_init(|| {
-                Regex::new(r#"(?i)(url\s*=\s*['"]http://(?!localhost|127\.0\.0\.1)|fetch\s*\(\s*['"]http://(?!localhost))"#)
-                    .unwrap()
+                // Simplified: detect http:// without localhost/127.0.0.1
+                Regex::new(r#"(?i)(url\s*=\s*['"]http://|fetch\s*\(\s*['"]http://)"#).unwrap()
             })
             .clone(),
             severity: Severity::Medium,
@@ -201,6 +201,24 @@ pub async fn run(config: &ScanConfig) -> Result<Vec<RawFinding>> {
 
         for rule in &rules {
             if rule.regex.is_match(line) {
+                // Manual filtering for rules that were simplified to avoid look-ahead panics
+                if rule.name == "Unauthenticated Route Handler" {
+                    let l = line.to_lowercase();
+                    if l.contains("auth")
+                        || l.contains("depends")
+                        || l.contains("token")
+                        || l.contains("user")
+                    {
+                        continue;
+                    }
+                }
+                if rule.name == "Plain HTTP Endpoint (No TLS)" {
+                    let l = line.to_lowercase();
+                    if l.contains("localhost") || l.contains("127.0.0.1") {
+                        continue;
+                    }
+                }
+
                 findings.push(RawFinding {
                     engine: Engine::AiCode,
                     cve_id: None,
